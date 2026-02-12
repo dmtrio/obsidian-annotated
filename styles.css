@@ -1,1 +1,41 @@
 /* Annotated plugin styles */
+
+/* Gutter column */
+.cm-annotated-comment-gutter {
+	width: 24px;
+	cursor: pointer;
+}
+
+/* Individual gutter marker */
+.cm-annotated-gutter-marker {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	font-size: 14px;
+	position: relative;
+	opacity: 0.8;
+	transition: opacity 150ms ease;
+}
+
+.cm-annotated-gutter-marker:hover {
+	opacity: 1;
+}
+
+/* Badge for multiple comments on the same line */
+.cm-annotated-gutter-badge {
+	position: absolute;
+	top: -4px;
+	right: -6px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	border-radius: 7px;
+	font-size: 10px;
+	line-height: 14px;
+	text-align: center;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: 600;
+}

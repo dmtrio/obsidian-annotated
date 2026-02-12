@@ -1,7 +1,9 @@
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { EditorView } from "@codemirror/view";
 import { Comment, DEFAULT_SETTINGS, PluginSettings, RangeLocation } from "./types";
 import { CommentManager } from "./managers/CommentManager";
 import { CommentModal } from "./ui/CommentModal";
+import { createCommentGutterExtension, setCommentLines, CommentLineMap } from "./editor/CommentGutterExtension";
 
 export default class AnnotatedPlugin extends Plugin {
 	settings: PluginSettings = DEFAULT_SETTINGS;
@@ -11,6 +13,12 @@ export default class AnnotatedPlugin extends Plugin {
 		await this.loadSettings();
 		this.commentManager = new CommentManager(this.app.vault);
 		this.addSettingTab(new AnnotatedSettingTab(this.app, this));
+
+		// Register CM6 gutter extension
+		const gutterExt = createCommentGutterExtension((view, line, count) => {
+			console.log(`Gutter click: line ${line}, ${count} comment(s)`);
+		});
+		this.registerEditorExtension(gutterExt);
 
 		this.addCommand({
 			id: "add-comment",
@@ -45,6 +53,7 @@ export default class AnnotatedPlugin extends Plugin {
 						replies: [],
 					};
 					await this.commentManager.addComment(file.path, comment);
+					await this.refreshGutterForFile(file.path);
 					new Notice("Comment added");
 				}).open();
 			},
@@ -55,6 +64,7 @@ export default class AnnotatedPlugin extends Plugin {
 				if (file.path.endsWith(".comments")) {
 					const notePath = file.path.slice(0, -".comments".length);
 					this.commentManager.invalidateCache(notePath);
+					this.refreshGutterForFile(notePath);
 				}
 			})
 		);
@@ -64,9 +74,31 @@ export default class AnnotatedPlugin extends Plugin {
 				if (file.path.endsWith(".comments")) {
 					const notePath = file.path.slice(0, -".comments".length);
 					this.commentManager.invalidateCache(notePath);
+					this.refreshGutterForFile(notePath);
 				}
 			})
 		);
+
+		// Refresh gutter when switching between notes
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (!leaf) return;
+				const view = leaf.view;
+				if (view instanceof MarkdownView && view.file) {
+					this.refreshGutterForFile(view.file.path);
+				}
+			})
+		);
+
+		// Refresh all open files on startup
+		this.app.workspace.onLayoutReady(() => {
+			this.app.workspace.iterateAllLeaves((leaf) => {
+				const view = leaf.view;
+				if (view instanceof MarkdownView && view.file) {
+					this.refreshGutterForFile(view.file.path);
+				}
+			});
+		});
 
 		console.log("Annotated plugin loaded");
 	}
@@ -74,6 +106,33 @@ export default class AnnotatedPlugin extends Plugin {
 	onunload() {
 		this.commentManager.clearCache();
 		console.log("Annotated plugin unloaded");
+	}
+
+	async refreshGutterForFile(filePath: string): Promise<void> {
+		const commentFile = await this.commentManager.getComments(filePath);
+		const lineMap: CommentLineMap = new Map();
+
+		if (commentFile) {
+			for (const c of commentFile.comments) {
+				// Respect hide settings
+				if (this.settings.hideResolvedByDefault && c.status === "resolved") continue;
+				if (this.settings.hideArchivedByDefault && c.status === "archived") continue;
+
+				const line = c.location.start_line;
+				lineMap.set(line, (lineMap.get(line) ?? 0) + 1);
+			}
+		}
+
+		// Dispatch to all editor views showing this file
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.file?.path === filePath) {
+				const cmEditor = (view.editor as any).cm as EditorView | undefined;
+				if (cmEditor) {
+					cmEditor.dispatch({ effects: setCommentLines.of(lineMap) });
+				}
+			}
+		});
 	}
 
 	async loadSettings() {
