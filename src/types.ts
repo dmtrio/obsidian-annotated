@@ -1,17 +1,5 @@
 // ── Location Types ──────────────────────────────────────────────
 
-export interface LineLocation {
-	type: "line";
-	start: number;  // 1-indexed line number
-	end: number;    // same as start for single-line
-}
-
-export interface HeadingLocation {
-	type: "heading";
-	heading: string;        // exact text, case-sensitive
-	heading_level: number;  // 1-6
-}
-
 export interface RangeLocation {
 	type: "range";
 	start_line: number;  // 1-indexed
@@ -20,7 +8,7 @@ export interface RangeLocation {
 	end_char: number;    // 0-indexed offset in line
 }
 
-export type Location = LineLocation | HeadingLocation | RangeLocation;
+export type Location = RangeLocation;
 
 // ── Comment Status ─────────────────────────────────────────────
 
