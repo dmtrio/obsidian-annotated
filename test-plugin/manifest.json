@@ -1,0 +1,9 @@
+{
+  "id": "test-comments-file",
+  "name": "Test Comments File Handling",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Minimal test plugin to validate .comments file handling in Obsidian",
+  "author": "test",
+  "isDesktopOnly": true
+}

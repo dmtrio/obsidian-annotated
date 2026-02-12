@@ -1,0 +1,12 @@
+# Build output
+main.js
+dist/
+
+# Dependencies
+node_modules
+
+# Obsidian plugin data
+data.json
+
+# IDE
+.claude

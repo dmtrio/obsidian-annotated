@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-annotated",
+  "name": "Annotated",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Code review-style comments for Obsidian notes",
+  "author": "Demetrio Urquidi",
+  "isDesktopOnly": false
+}
