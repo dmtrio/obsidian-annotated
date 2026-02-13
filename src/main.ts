@@ -2,7 +2,7 @@ import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting } 
 import { EditorView } from "@codemirror/view";
 import { Comment, CommentFile, CommentReply, DEFAULT_SETTINGS, PluginSettings, RangeLocation } from "./types";
 import { CommentManager } from "./managers/CommentManager";
-import { CommentModal } from "./ui/CommentModal";
+import { CommentModal, CommentModalOptions } from "./ui/CommentModal";
 import { CommentPopup } from "./ui/CommentPopup";
 import { createCommentGutterExtension, setCommentLines, CommentLineMap } from "./editor/CommentGutterExtension";
 import { captureSnippet, findLineBySnippet } from "./utils/SnippetMatcher";
@@ -52,6 +52,7 @@ export default class AnnotatedPlugin extends Plugin {
 		this.addCommand({
 			id: "add-comment",
 			name: "Add Comment",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				const file = view.file;
 				if (!file) {
@@ -62,30 +63,42 @@ export default class AnnotatedPlugin extends Plugin {
 				const from = editor.getCursor("from");
 				const to = editor.getCursor("to");
 
-				new CommentModal(this.app, async (content: string) => {
+				const location: RangeLocation = {
+					type: "range",
+					start_line: from.line + 1,
+					start_char: from.ch,
+					end_line: to.line + 1,
+					end_char: to.ch,
+				};
+
+				const makeOnSubmit = (loc: RangeLocation) => async (content: string, author: string) => {
 					const now = new Date().toISOString();
-					const location: RangeLocation = {
-						type: "range",
-						start_line: from.line + 1,
-						start_char: from.ch,
-						end_line: to.line + 1,
-						end_char: to.ch,
-					};
 					const comment: Comment = {
 						id: this.commentManager.generateId(),
-						author: this.settings.defaultAuthor,
+						author,
 						created_at: now,
 						updated_at: now,
-						location,
+						location: loc,
 						content,
 						status: "open",
 						replies: [],
-						content_snippet: captureSnippet(editor.getLine(from.line)),
+						content_snippet: captureSnippet(editor.getLine(loc.start_line - 1)),
 					};
 					await this.commentManager.addComment(file.path, comment);
 					await this.refreshGutterForFile(file.path);
 					new Notice("Comment added");
-				}).open();
+				};
+
+				this.openCommentModal(
+					{
+						mode: "create",
+						author: this.settings.defaultAuthor,
+						location,
+						snippet: captureSnippet(editor.getLine(from.line)),
+						onSubmit: makeOnSubmit(location),
+					},
+					{ onSubmitFactory: makeOnSubmit },
+				);
 			},
 		});
 
@@ -323,6 +336,81 @@ export default class AnnotatedPlugin extends Plugin {
 		this.commentPopup.open(view, line, comments);
 	}
 
+	private openCommentModal(
+		opts: CommentModalOptions,
+		extra?: { draftContent?: string; onSubmitFactory?: (loc: RangeLocation) => CommentModalOptions["onSubmit"] },
+	): void {
+		const finalOpts: CommentModalOptions = { ...opts, draftContent: extra?.draftContent };
+
+		if (opts.mode === "create" && opts.location) {
+			finalOpts.onReselect = () => {
+				const draft = modal.getDraftContent();
+				modal.close();
+
+				new Notice("Select new location in the editor");
+
+				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const editorDom = mdView
+					? ((mdView.editor as any).cm as EditorView | undefined)?.dom
+					: null;
+
+				if (!editorDom) return;
+
+				let settled: ReturnType<typeof setTimeout> | null = null;
+				const cleanup = () => {
+					clearTimeout(timeout);
+					if (settled) clearTimeout(settled);
+					editorDom.removeEventListener("mouseup", onMouseUp);
+				};
+
+				const timeout = window.setTimeout(() => {
+					cleanup();
+					new Notice("Re-select cancelled");
+				}, 10000);
+
+				const onMouseUp = () => {
+					// Clear any pending settle — user may still be adjusting selection
+					if (settled) clearTimeout(settled);
+
+					// Wait 300ms to let the user finish dragging or just click
+					settled = setTimeout(() => {
+						const editor = mdView!.editor;
+						const from = editor.getCursor("from");
+						const to = editor.getCursor("to");
+
+						cleanup();
+
+						const hasSelection = from.line !== to.line || from.ch !== to.ch;
+						const newLocation: RangeLocation = {
+							type: "range",
+							start_line: from.line + 1,
+							start_char: hasSelection ? from.ch : 0,
+							end_line: to.line + 1,
+							end_char: hasSelection ? to.ch : 0,
+						};
+
+						const newSnippet = captureSnippet(editor.getLine(from.line));
+
+						const newOpts: CommentModalOptions = {
+							...opts,
+							location: newLocation,
+							snippet: newSnippet,
+							onSubmit: extra?.onSubmitFactory
+								? extra.onSubmitFactory(newLocation)
+								: opts.onSubmit,
+						};
+						this.openCommentModal(newOpts, { draftContent: draft, onSubmitFactory: extra?.onSubmitFactory });
+					}, 300);
+				};
+
+				editorDom.addEventListener("mouseup", onMouseUp);
+			};
+		}
+
+		const modal = new CommentModal(this.app, finalOpts);
+		modal.open();
+	}
+
 	private handleReply(comment: Comment): void {
 		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!mdView?.file) return;
@@ -330,24 +418,29 @@ export default class AnnotatedPlugin extends Plugin {
 		const filePath = mdView.file.path;
 		const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
 
-		new CommentModal(this.app, async (content: string) => {
-			const now = new Date().toISOString();
-			const reply: CommentReply = {
-				id: this.commentManager.generateId(),
-				author: this.settings.defaultAuthor,
-				created_at: now,
-				updated_at: now,
-				content,
-				status: "open",
-			};
-			await this.commentManager.addReply(filePath, comment.id, reply);
-			await this.refreshGutterForFile(filePath);
+		this.openCommentModal({
+			mode: "reply",
+			author: this.settings.defaultAuthor,
+			replyingTo: comment.author,
+			onSubmit: async (content: string, author: string) => {
+				const now = new Date().toISOString();
+				const reply: CommentReply = {
+					id: this.commentManager.generateId(),
+					author,
+					created_at: now,
+					updated_at: now,
+					content,
+					status: "open",
+				};
+				await this.commentManager.addReply(filePath, comment.id, reply);
+				await this.refreshGutterForFile(filePath);
 
-			// Re-open popup to show new reply
-			if (cmEditor) {
-				this.openCommentPopup(cmEditor, comment.location.start_line);
-			}
-		}).open();
+				// Re-open popup to show new reply
+				if (cmEditor) {
+					this.openCommentPopup(cmEditor, comment.location.start_line);
+				}
+			},
+		});
 	}
 
 	private handleResolve(comment: Comment): void {
