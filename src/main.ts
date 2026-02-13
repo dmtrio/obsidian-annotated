@@ -1,22 +1,30 @@
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { Comment, DEFAULT_SETTINGS, PluginSettings, RangeLocation } from "./types";
+import { Comment, CommentReply, DEFAULT_SETTINGS, PluginSettings, RangeLocation } from "./types";
 import { CommentManager } from "./managers/CommentManager";
 import { CommentModal } from "./ui/CommentModal";
+import { CommentPopup } from "./ui/CommentPopup";
 import { createCommentGutterExtension, setCommentLines, CommentLineMap } from "./editor/CommentGutterExtension";
 
 export default class AnnotatedPlugin extends Plugin {
 	settings: PluginSettings = DEFAULT_SETTINGS;
 	commentManager: CommentManager;
+	private commentPopup: CommentPopup;
 
 	async onload() {
 		await this.loadSettings();
 		this.commentManager = new CommentManager(this.app.vault);
 		this.addSettingTab(new AnnotatedSettingTab(this.app, this));
 
+		// Create popup before gutter extension
+		this.commentPopup = new CommentPopup(this.settings, {
+			onReply: (comment) => this.handleReply(comment),
+			onResolve: (comment) => this.handleResolve(comment),
+		});
+
 		// Register CM6 gutter extension
-		const gutterExt = createCommentGutterExtension((view, line, count) => {
-			console.log(`Gutter click: line ${line}, ${count} comment(s)`);
+		const gutterExt = createCommentGutterExtension((view, line, _count) => {
+			this.openCommentPopup(view, line);
 		});
 		this.registerEditorExtension(gutterExt);
 
@@ -82,6 +90,7 @@ export default class AnnotatedPlugin extends Plugin {
 		// Refresh gutter when switching between notes
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
+				this.commentPopup.close();
 				if (!leaf) return;
 				const view = leaf.view;
 				if (view instanceof MarkdownView && view.file) {
@@ -104,6 +113,7 @@ export default class AnnotatedPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.commentPopup.destroy();
 		this.commentManager.clearCache();
 		console.log("Annotated plugin unloaded");
 	}
@@ -131,6 +141,69 @@ export default class AnnotatedPlugin extends Plugin {
 				if (cmEditor) {
 					cmEditor.dispatch({ effects: setCommentLines.of(lineMap) });
 				}
+			}
+		});
+	}
+
+	private async openCommentPopup(view: EditorView, line: number): Promise<void> {
+		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!mdView?.file) return;
+
+		const filePath = mdView.file.path;
+		const commentFile = await this.commentManager.getComments(filePath);
+		if (!commentFile) return;
+
+		const comments = commentFile.comments.filter((c) => {
+			if (this.settings.hideResolvedByDefault && c.status === "resolved") return false;
+			if (this.settings.hideArchivedByDefault && c.status === "archived") return false;
+			return c.location.start_line === line;
+		});
+
+		if (comments.length === 0) return;
+		this.commentPopup.open(view, line, comments);
+	}
+
+	private handleReply(comment: Comment): void {
+		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!mdView?.file) return;
+
+		const filePath = mdView.file.path;
+		const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
+
+		new CommentModal(this.app, async (content: string) => {
+			const now = new Date().toISOString();
+			const reply: CommentReply = {
+				id: this.commentManager.generateId(),
+				author: this.settings.defaultAuthor,
+				created_at: now,
+				updated_at: now,
+				content,
+				status: "open",
+			};
+			await this.commentManager.addReply(filePath, comment.id, reply);
+			await this.refreshGutterForFile(filePath);
+
+			// Re-open popup to show new reply
+			if (cmEditor) {
+				this.openCommentPopup(cmEditor, comment.location.start_line);
+			}
+		}).open();
+	}
+
+	private handleResolve(comment: Comment): void {
+		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!mdView?.file) return;
+
+		const filePath = mdView.file.path;
+		const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
+
+		this.commentManager.resolveComment(filePath, comment.id, this.settings.defaultAuthor).then(async () => {
+			await this.refreshGutterForFile(filePath);
+			this.commentPopup.close();
+
+			// Re-open if there are still visible comments on that line
+			if (cmEditor) {
+				this.openCommentPopup(cmEditor, comment.location.start_line);
 			}
 		});
 	}
