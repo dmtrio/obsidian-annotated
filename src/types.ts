@@ -36,6 +36,8 @@ export interface Comment {
 	resolved_at?: string;  // ISO 8601
 	resolved_by?: string;
 	replies: CommentReply[];
+	content_snippet?: string;  // first 50 chars of the annotated line
+	is_stale?: boolean;        // true if snippet couldn't be matched on open
 }
 
 // ── Comment File ───────────────────────────────────────────────

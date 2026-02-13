@@ -3,8 +3,11 @@ import { Extension } from "@codemirror/state";
 import { StateEffect, StateField } from "@codemirror/state";
 import { gutter, GutterMarker } from "@codemirror/view";
 
-/** line (1-indexed) → comment count */
-export type CommentLineMap = Map<number, number>;
+/** Per-line info: comment count and whether any are stale */
+export type CommentLineInfo = { count: number; hasStale: boolean };
+
+/** line (1-indexed) → comment line info */
+export type CommentLineMap = Map<number, CommentLineInfo>;
 
 /** Dispatch channel to push new line→count data into the editor */
 export const setCommentLines = StateEffect.define<CommentLineMap>();
@@ -29,7 +32,7 @@ export const commentLineField = StateField.define<CommentLineMap>({
 		if (tr.docChanged && prev.size > 0) {
 			const newMap: CommentLineMap = new Map();
 			const doc = tr.newDoc;
-			for (const [line, count] of prev) {
+			for (const [line, info] of prev) {
 				// Convert 1-indexed line to a document position
 				if (line < 1 || line > tr.startState.doc.lines) continue;
 				const pos = tr.startState.doc.line(line).from;
@@ -38,8 +41,14 @@ export const commentLineField = StateField.define<CommentLineMap>({
 				// Convert back to line number
 				if (newPos < 0 || newPos > doc.length) continue;
 				const newLine = doc.lineAt(newPos).number;
-				// Sum counts if multiple old lines collapse into one
-				newMap.set(newLine, (newMap.get(newLine) ?? 0) + count);
+				// Merge: sum counts, OR stale flags
+				const existing = newMap.get(newLine);
+				if (existing) {
+					existing.count += info.count;
+					existing.hasStale = existing.hasStale || info.hasStale;
+				} else {
+					newMap.set(newLine, { count: info.count, hasStale: info.hasStale });
+				}
 			}
 			return newMap;
 		}
@@ -49,18 +58,19 @@ export const commentLineField = StateField.define<CommentLineMap>({
 });
 
 class CommentGutterMarker extends GutterMarker {
-	constructor(readonly count: number) {
+	constructor(readonly count: number, readonly hasStale: boolean) {
 		super();
 	}
 
 	eq(other: CommentGutterMarker): boolean {
-		return this.count === other.count;
+		return this.count === other.count && this.hasStale === other.hasStale;
 	}
 
 	toDOM(): Node {
 		const wrapper = document.createElement("div");
-		wrapper.className = "cm-annotated-gutter-marker";
-		wrapper.textContent = "\u{1F4AC}";
+		wrapper.className = "cm-annotated-gutter-marker" +
+			(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+		wrapper.textContent = this.hasStale ? "\u26A0" : "\u{1F4AC}";
 		if (this.count > 1) {
 			const badge = wrapper.createSpan({ cls: "cm-annotated-gutter-badge" });
 			badge.textContent = String(this.count);
@@ -69,13 +79,14 @@ class CommentGutterMarker extends GutterMarker {
 	}
 }
 
-// Cache markers by count to avoid re-creating DOM for same counts
-const markerCache = new Map<number, CommentGutterMarker>();
-function getMarker(count: number): CommentGutterMarker {
-	let m = markerCache.get(count);
+// Cache markers by count+stale to avoid re-creating DOM
+const markerCache = new Map<string, CommentGutterMarker>();
+function getMarker(count: number, hasStale = false): CommentGutterMarker {
+	const key = `${count}:${hasStale ? 1 : 0}`;
+	let m = markerCache.get(key);
 	if (!m) {
-		m = new CommentGutterMarker(count);
-		markerCache.set(count, m);
+		m = new CommentGutterMarker(count, hasStale);
+		markerCache.set(key, m);
 	}
 	return m;
 }
@@ -92,17 +103,17 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 			lineMarker(view, line) {
 				const map = view.state.field(commentLineField);
 				const lineNum = view.state.doc.lineAt(line.from).number;
-				const count = map.get(lineNum);
-				if (!count) return null;
-				return getMarker(count);
+				const info = map.get(lineNum);
+				if (!info) return null;
+				return getMarker(info.count, info.hasStale);
 			},
 			domEventHandlers: {
 				click(view, line) {
 					const map = view.state.field(commentLineField);
 					const lineNum = view.state.doc.lineAt(line.from).number;
-					const count = map.get(lineNum);
-					if (count) {
-						onClick(view, lineNum, count);
+					const info = map.get(lineNum);
+					if (info) {
+						onClick(view, lineNum, info.count);
 					}
 					return true;
 				},

@@ -172,3 +172,20 @@
 .annotated-popup-show-more:hover {
 	text-decoration: underline;
 }
+
+/* ── Stale comment states ──────────────────────────────────── */
+
+.cm-annotated-gutter-marker--stale {
+	opacity: 0.5;
+}
+
+.annotated-popup-comment--stale {
+	border-left: 3px solid var(--text-warning);
+}
+
+.annotated-popup-stale-notice {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-warning);
+	font-style: italic;
+	margin-bottom: 4px;
+}

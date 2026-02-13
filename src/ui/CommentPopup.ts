@@ -151,9 +151,19 @@ export class CommentPopup {
 
 	private renderCommentCard(container: HTMLElement, comment: Comment): void {
 		const isResolved = comment.status === "resolved";
-		const card = container.createDiv({
-			cls: `annotated-popup-comment${isResolved ? " annotated-popup-comment--resolved" : ""}`,
-		});
+		const isStale = comment.is_stale === true;
+		const cls = "annotated-popup-comment"
+			+ (isResolved ? " annotated-popup-comment--resolved" : "")
+			+ (isStale ? " annotated-popup-comment--stale" : "");
+		const card = container.createDiv({ cls });
+
+		// Stale notice
+		if (isStale) {
+			card.createDiv({
+				cls: "annotated-popup-stale-notice",
+				text: "This comment may have drifted from its original location.",
+			});
+		}
 
 		// Header
 		const header = card.createDiv({ cls: "annotated-popup-header" });
