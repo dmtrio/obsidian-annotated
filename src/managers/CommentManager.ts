@@ -54,6 +54,7 @@ export class CommentManager {
 
 		comment.replies.push(reply);
 		comment.updated_at = new Date().toISOString();
+		comment.last_activity_at = reply.created_at;
 		await this.saveComments(commentFile);
 	}
 

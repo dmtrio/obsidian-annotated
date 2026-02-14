@@ -36,6 +36,7 @@ export interface Comment {
 	resolved_at?: string;  // ISO 8601
 	resolved_by?: string;
 	replies: CommentReply[];
+	last_activity_at: string;  // ISO 8601 — created_at or latest reply's created_at
 	content_snippet?: string;  // first 50 chars of the annotated line
 	is_stale?: boolean;        // true if snippet couldn't be matched on open
 }

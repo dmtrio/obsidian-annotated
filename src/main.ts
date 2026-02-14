@@ -4,6 +4,7 @@ import { Comment, CommentFile, CommentReply, DEFAULT_SETTINGS, PluginSettings, R
 import { CommentManager } from "./managers/CommentManager";
 import { CommentModal, CommentModalOptions } from "./ui/CommentModal";
 import { CommentPopup } from "./ui/CommentPopup";
+import { CommentSidebarView, VIEW_TYPE_COMMENT_SIDEBAR } from "./ui/CommentSidebar";
 import { createCommentGutterExtension, setCommentLines, CommentLineMap } from "./editor/CommentGutterExtension";
 import { captureSnippet, findLineBySnippet } from "./utils/SnippetMatcher";
 import {
@@ -17,6 +18,7 @@ export default class AnnotatedPlugin extends Plugin {
 	settings: PluginSettings = DEFAULT_SETTINGS;
 	commentManager: CommentManager;
 	private commentPopup: CommentPopup;
+	private commentSidebar: CommentSidebarView | null = null;
 	private _isSelfSave = false;
 
 	async onload() {
@@ -48,6 +50,20 @@ export default class AnnotatedPlugin extends Plugin {
 			}),
 			commentPositionTrackerPlugin,
 		]);
+
+		// Register sidebar view
+		this.registerView(VIEW_TYPE_COMMENT_SIDEBAR, (leaf) => {
+			const view = new CommentSidebarView(leaf, this);
+			this.commentSidebar = view;
+			return view;
+		});
+
+		this.addCommand({
+			id: "toggle-comment-sidebar",
+			name: "Toggle Comment Sidebar",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "/" }],
+			callback: () => this.toggleSidebar(),
+		});
 
 		this.addCommand({
 			id: "add-comment",
@@ -82,10 +98,12 @@ export default class AnnotatedPlugin extends Plugin {
 						content,
 						status: "open",
 						replies: [],
+						last_activity_at: now,
 						content_snippet: captureSnippet(editor.getLine(loc.start_line - 1)),
 					};
 					await this.commentManager.addComment(file.path, comment);
 					await this.refreshGutterForFile(file.path);
+					this.refreshSidebar();
 					new Notice("Comment added");
 				};
 
@@ -109,6 +127,7 @@ export default class AnnotatedPlugin extends Plugin {
 					const notePath = file.path.slice(0, -".comments".length);
 					this.commentManager.invalidateCache(notePath);
 					this.refreshGutterForFile(notePath);
+					this.refreshSidebar();
 				}
 			})
 		);
@@ -133,6 +152,7 @@ export default class AnnotatedPlugin extends Plugin {
 					const filePath = view.file.path;
 					await this.verifyAndRelocateComments(filePath);
 					await this.refreshGutterForFile(filePath);
+					this.refreshSidebar(filePath);
 				}
 			})
 		);
@@ -155,7 +175,28 @@ export default class AnnotatedPlugin extends Plugin {
 	onunload() {
 		this.commentPopup.destroy();
 		this.commentManager.clearCache();
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
 		console.log("Annotated plugin unloaded");
+	}
+
+	private async toggleSidebar(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
+		if (existing.length > 0) {
+			existing.forEach((leaf) => leaf.detach());
+			this.commentSidebar = null;
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: VIEW_TYPE_COMMENT_SIDEBAR, active: true });
+		this.app.workspace.revealLeaf(leaf);
+	}
+
+	private refreshSidebar(filePath?: string): void {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
+		if (leaves.length === 0) return;
+		const view = leaves[0].view as CommentSidebarView;
+		view.refresh(filePath);
 	}
 
 	async refreshGutterForFile(filePath: string): Promise<void> {
@@ -318,6 +359,18 @@ export default class AnnotatedPlugin extends Plugin {
 		return result;
 	}
 
+	private getMarkdownViewForFile(filePath: string): MarkdownView | null {
+		let result: MarkdownView | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (result) return;
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.file?.path === filePath) {
+				result = view;
+			}
+		});
+		return result;
+	}
+
 	private async openCommentPopup(view: EditorView, line: number): Promise<void> {
 		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!mdView?.file) return;
@@ -411,8 +464,10 @@ export default class AnnotatedPlugin extends Plugin {
 		modal.open();
 	}
 
-	private handleReply(comment: Comment): void {
-		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+	handleReply(comment: Comment, targetFilePath?: string): void {
+		const mdView = targetFilePath
+			? this.getMarkdownViewForFile(targetFilePath)
+			: this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!mdView?.file) return;
 
 		const filePath = mdView.file.path;
@@ -434,6 +489,7 @@ export default class AnnotatedPlugin extends Plugin {
 				};
 				await this.commentManager.addReply(filePath, comment.id, reply);
 				await this.refreshGutterForFile(filePath);
+				this.refreshSidebar();
 
 				// Re-open popup to show new reply
 				if (cmEditor) {
@@ -443,8 +499,10 @@ export default class AnnotatedPlugin extends Plugin {
 		});
 	}
 
-	private handleResolve(comment: Comment): void {
-		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+	handleResolve(comment: Comment, targetFilePath?: string): void {
+		const mdView = targetFilePath
+			? this.getMarkdownViewForFile(targetFilePath)
+			: this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!mdView?.file) return;
 
 		const filePath = mdView.file.path;
@@ -452,6 +510,7 @@ export default class AnnotatedPlugin extends Plugin {
 
 		this.commentManager.resolveComment(filePath, comment.id, this.settings.defaultAuthor).then(async () => {
 			await this.refreshGutterForFile(filePath);
+			this.refreshSidebar();
 			this.commentPopup.close();
 
 			// Re-open if there are still visible comments on that line
