@@ -128,6 +128,18 @@ class CommentGutterMarker extends GutterMarker {
 
 const defaultConfig: GutterConfig = { style: "icon", emoji: "\u{1F4AC}" };
 
+// Cache markers by count+stale+style+emoji to avoid re-creating DOM
+const markerCache = new Map<string, CommentGutterMarker>();
+function getMarker(count: number, hasStale: boolean, config: GutterConfig): CommentGutterMarker {
+	const key = `${count}:${hasStale ? 1 : 0}:${config.style}:${config.emoji}`;
+	let m = markerCache.get(key);
+	if (!m) {
+		m = new CommentGutterMarker(count, hasStale, config);
+		markerCache.set(key, m);
+	}
+	return m;
+}
+
 /**
  * Factory that returns a CM6 Extension array: [stateField, gutter].
  * The onClick callback fires when the user clicks a gutter marker.
@@ -144,7 +156,7 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 				const info = map.get(lineNum);
 				if (!info) return null;
 				const config = view.state.field(gutterConfigField);
-				return new CommentGutterMarker(info.count, info.hasStale, config);
+				return getMarker(info.count, info.hasStale, config);
 			},
 			domEventHandlers: {
 				click(view, line) {
@@ -157,7 +169,7 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 					return true;
 				},
 			},
-			initialSpacer: () => new CommentGutterMarker(1, false, defaultConfig),
+			initialSpacer: () => getMarker(1, false, defaultConfig),
 		}),
 	];
 }
