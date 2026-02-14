@@ -12,6 +12,31 @@ export type CommentLineMap = Map<number, CommentLineInfo>;
 /** Dispatch channel to push new line→count data into the editor */
 export const setCommentLines = StateEffect.define<CommentLineMap>();
 
+/** Indicator style: "icon" | "badge" | "highlight" */
+export type IndicatorStyle = "icon" | "badge" | "highlight";
+
+/** Gutter display config: style + custom emoji */
+export interface GutterConfig {
+	style: IndicatorStyle;
+	emoji: string;
+}
+
+/** Effect to update the gutter config at runtime */
+export const setGutterConfig = StateEffect.define<GutterConfig>();
+
+/** StateField that stores the current gutter config */
+export const gutterConfigField = StateField.define<GutterConfig>({
+	create() {
+		return { style: "icon" as IndicatorStyle, emoji: "\u{1F4AC}" };
+	},
+	update(prev, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setGutterConfig)) return e.value;
+		}
+		return prev;
+	},
+});
+
 /** Callback type for gutter click events */
 export type GutterClickCallback = (view: EditorView, line: number, count: number) => void;
 
@@ -58,19 +83,41 @@ export const commentLineField = StateField.define<CommentLineMap>({
 });
 
 class CommentGutterMarker extends GutterMarker {
-	constructor(readonly count: number, readonly hasStale: boolean) {
+	constructor(
+		readonly count: number,
+		readonly hasStale: boolean,
+		readonly config: GutterConfig,
+	) {
 		super();
 	}
 
 	eq(other: CommentGutterMarker): boolean {
-		return this.count === other.count && this.hasStale === other.hasStale;
+		return this.count === other.count
+			&& this.hasStale === other.hasStale
+			&& this.config.style === other.config.style
+			&& this.config.emoji === other.config.emoji;
 	}
 
 	toDOM(): Node {
 		const wrapper = document.createElement("div");
+
+		if (this.config.style === "highlight") {
+			wrapper.className = "cm-annotated-gutter-marker cm-annotated-gutter-marker--highlight" +
+				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+			return wrapper;
+		}
+
+		if (this.config.style === "badge") {
+			wrapper.className = "cm-annotated-gutter-marker cm-annotated-gutter-marker--badge-style" +
+				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+			wrapper.textContent = this.hasStale ? "\u26A0" : String(this.count);
+			return wrapper;
+		}
+
+		// Default: icon style — use custom emoji
 		wrapper.className = "cm-annotated-gutter-marker" +
 			(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
-		wrapper.textContent = this.hasStale ? "\u26A0" : "\u{1F4AC}";
+		wrapper.textContent = this.hasStale ? "\u26A0" : this.config.emoji;
 		if (this.count > 1) {
 			const badge = wrapper.createSpan({ cls: "cm-annotated-gutter-badge" });
 			badge.textContent = String(this.count);
@@ -79,17 +126,7 @@ class CommentGutterMarker extends GutterMarker {
 	}
 }
 
-// Cache markers by count+stale to avoid re-creating DOM
-const markerCache = new Map<string, CommentGutterMarker>();
-function getMarker(count: number, hasStale = false): CommentGutterMarker {
-	const key = `${count}:${hasStale ? 1 : 0}`;
-	let m = markerCache.get(key);
-	if (!m) {
-		m = new CommentGutterMarker(count, hasStale);
-		markerCache.set(key, m);
-	}
-	return m;
-}
+const defaultConfig: GutterConfig = { style: "icon", emoji: "\u{1F4AC}" };
 
 /**
  * Factory that returns a CM6 Extension array: [stateField, gutter].
@@ -98,6 +135,7 @@ function getMarker(count: number, hasStale = false): CommentGutterMarker {
 export function createCommentGutterExtension(onClick: GutterClickCallback): Extension {
 	return [
 		commentLineField,
+		gutterConfigField,
 		gutter({
 			class: "cm-annotated-comment-gutter",
 			lineMarker(view, line) {
@@ -105,7 +143,8 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 				const lineNum = view.state.doc.lineAt(line.from).number;
 				const info = map.get(lineNum);
 				if (!info) return null;
-				return getMarker(info.count, info.hasStale);
+				const config = view.state.field(gutterConfigField);
+				return new CommentGutterMarker(info.count, info.hasStale, config);
 			},
 			domEventHandlers: {
 				click(view, line) {
@@ -118,7 +157,7 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 					return true;
 				},
 			},
-			initialSpacer: () => getMarker(1),
+			initialSpacer: () => new CommentGutterMarker(1, false, defaultConfig),
 		}),
 	];
 }

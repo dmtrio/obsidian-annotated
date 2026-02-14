@@ -162,9 +162,8 @@ export class CommentSidebarView extends ItemView {
 			return;
 		}
 
-		// Filter by author (and hide archived)
+		// Filter by author
 		const filtered = commentFile.comments.filter((c) => {
-			if (c.status === "archived" && this.plugin.settings.hideArchivedByDefault) return false;
 			if (this.authorFilter && c.author !== this.authorFilter) return false;
 			return true;
 		});

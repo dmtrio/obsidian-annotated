@@ -23,6 +23,29 @@
   opacity: 1;
 }
 
+/* Badge style: show count as text with accent background */
+.cm-annotated-gutter-marker--badge-style {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  width: 18px;
+  height: 18px;
+}
+
+/* Highlight style: colored bar in the gutter */
+.cm-annotated-gutter-marker--highlight {
+  background-color: var(--interactive-accent);
+  opacity: 0.5;
+  border-radius: 2px;
+  width: 4px;
+  height: 100%;
+}
+.cm-annotated-gutter-marker--highlight:hover {
+  opacity: 0.8;
+}
+
 /* Badge for multiple comments on the same line */
 .cm-annotated-gutter-badge {
   position: absolute;

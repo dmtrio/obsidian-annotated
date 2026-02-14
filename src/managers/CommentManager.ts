@@ -92,13 +92,12 @@ export class CommentManager {
 	private recalculateMetadata(commentFile: CommentFile): void {
 		const comments = commentFile.comments;
 		const authors = new Set<string>();
-		let open = 0, resolved = 0, archived = 0;
+		let open = 0, resolved = 0;
 
 		for (const c of comments) {
 			authors.add(c.author);
 			if (c.status === "open") open++;
 			else if (c.status === "resolved") resolved++;
-			else if (c.status === "archived") archived++;
 
 			for (const r of c.replies) {
 				authors.add(r.author);
@@ -109,7 +108,6 @@ export class CommentManager {
 			total_comments: comments.length,
 			open_count: open,
 			resolved_count: resolved,
-			archived_count: archived,
 			authors: [...authors],
 		};
 	}
@@ -126,7 +124,6 @@ export class CommentManager {
 				total_comments: 0,
 				open_count: 0,
 				resolved_count: 0,
-				archived_count: 0,
 				authors: [],
 			},
 		};

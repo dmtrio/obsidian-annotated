@@ -1,11 +1,11 @@
-import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, Editor, MarkdownView, Menu, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { Comment, CommentFile, CommentReply, DEFAULT_SETTINGS, PluginSettings, RangeLocation } from "./types";
 import { CommentManager } from "./managers/CommentManager";
 import { CommentModal, CommentModalOptions } from "./ui/CommentModal";
 import { CommentPopup } from "./ui/CommentPopup";
 import { CommentSidebarView, VIEW_TYPE_COMMENT_SIDEBAR } from "./ui/CommentSidebar";
-import { createCommentGutterExtension, setCommentLines, CommentLineMap } from "./editor/CommentGutterExtension";
+import { createCommentGutterExtension, setCommentLines, setGutterConfig, CommentLineMap } from "./editor/CommentGutterExtension";
 import { captureSnippet, findLineBySnippet } from "./utils/SnippetMatcher";
 import {
 	commentTrackerField,
@@ -75,48 +75,18 @@ export default class AnnotatedPlugin extends Plugin {
 					new Notice("No active file");
 					return;
 				}
+				this.addCommentAtCursor(editor, file);
+			},
+		});
 
-				const from = editor.getCursor("from");
-				const to = editor.getCursor("to");
-
-				const location: RangeLocation = {
-					type: "range",
-					start_line: from.line + 1,
-					start_char: from.ch,
-					end_line: to.line + 1,
-					end_char: to.ch,
-				};
-
-				const makeOnSubmit = (loc: RangeLocation) => async (content: string, author: string) => {
-					const now = new Date().toISOString();
-					const comment: Comment = {
-						id: this.commentManager.generateId(),
-						author,
-						created_at: now,
-						updated_at: now,
-						location: loc,
-						content,
-						status: "open",
-						replies: [],
-						last_activity_at: now,
-						content_snippet: captureSnippet(editor.getLine(loc.start_line - 1)),
-					};
-					await this.commentManager.addComment(file.path, comment);
-					await this.refreshGutterForFile(file.path);
-					this.refreshSidebar();
-					new Notice("Comment added");
-				};
-
-				this.openCommentModal(
-					{
-						mode: "create",
-						author: this.settings.defaultAuthor,
-						location,
-						snippet: captureSnippet(editor.getLine(from.line)),
-						onSubmit: makeOnSubmit(location),
-					},
-					{ onSubmitFactory: makeOnSubmit },
-				);
+		this.addCommand({
+			id: "export-comments",
+			name: "Export Comments to Clipboard",
+			checkCallback: (checking: boolean) => {
+				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!mdView?.file) return false;
+				if (checking) return true;
+				this.exportComments(mdView.file.path);
 			},
 		});
 
@@ -139,6 +109,56 @@ export default class AnnotatedPlugin extends Plugin {
 					this.commentManager.invalidateCache(notePath);
 					this.refreshGutterForFile(notePath);
 				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on("rename", async (file: TAbstractFile, oldPath: string) => {
+				// If the .comments file itself was renamed directly, just invalidate
+				if (oldPath.endsWith(".comments")) {
+					const oldNotePath = oldPath.slice(0, -".comments".length);
+					this.commentManager.invalidateCache(oldNotePath);
+					return;
+				}
+
+				if (!(file instanceof TFile) || !file.path.endsWith(".md")) return;
+
+				const oldCommentsPath = oldPath + ".comments";
+				const newCommentsPath = file.path + ".comments";
+
+				if (!(await this.app.vault.adapter.exists(oldCommentsPath))) return;
+
+				this._isSelfSave = true;
+				try {
+					await this.app.vault.adapter.rename(oldCommentsPath, newCommentsPath);
+
+					const raw = await this.app.vault.adapter.read(newCommentsPath);
+					const commentFile = JSON.parse(raw) as CommentFile;
+					commentFile.note_path = file.path;
+					await this.app.vault.adapter.write(newCommentsPath, JSON.stringify(commentFile, null, 2));
+
+					this.commentManager.invalidateCache(oldPath);
+					this.commentManager.invalidateCache(file.path);
+
+					await this.refreshGutterForFile(file.path);
+					this.refreshSidebar(file.path);
+				} finally {
+					setTimeout(() => { this._isSelfSave = false; }, 500);
+				}
+			})
+		);
+
+		// Editor context menu — "Add Comment"
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor) => {
+				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!mdView?.file) return;
+				const file = mdView.file;
+				menu.addItem((item) => {
+					item.setTitle("Add Comment")
+						.setIcon("message-square")
+						.onClick(() => this.addCommentAtCursor(editor, file));
+				});
 			})
 		);
 
@@ -203,11 +223,10 @@ export default class AnnotatedPlugin extends Plugin {
 		const commentFile = await this.commentManager.getComments(filePath);
 		const lineMap: CommentLineMap = new Map();
 
-		if (commentFile) {
+		if (commentFile && this.settings.showGutterIndicators) {
 			for (const c of commentFile.comments) {
 				// Respect hide settings
 				if (this.settings.hideResolvedByDefault && c.status === "resolved") continue;
-				if (this.settings.hideArchivedByDefault && c.status === "archived") continue;
 
 				const line = c.location.start_line;
 				const existing = lineMap.get(line);
@@ -220,13 +239,24 @@ export default class AnnotatedPlugin extends Plugin {
 			}
 		}
 
+		const rawEmoji = this.settings.customGutterEmoji || "\u{1F4AC}";
+		const config = {
+			style: this.settings.commentIndicatorStyle,
+			emoji: [...rawEmoji][0] ?? "\u{1F4AC}",
+		};
+
 		// Dispatch to all editor views showing this file
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			const view = leaf.view;
 			if (view instanceof MarkdownView && view.file?.path === filePath) {
 				const cmEditor = (view.editor as any).cm as EditorView | undefined;
 				if (cmEditor) {
-					cmEditor.dispatch({ effects: setCommentLines.of(lineMap) });
+					cmEditor.dispatch({
+						effects: [
+							setCommentLines.of(lineMap),
+							setGutterConfig.of(config),
+						],
+					});
 				}
 			}
 		});
@@ -381,7 +411,6 @@ export default class AnnotatedPlugin extends Plugin {
 
 		const comments = commentFile.comments.filter((c) => {
 			if (this.settings.hideResolvedByDefault && c.status === "resolved") return false;
-			if (this.settings.hideArchivedByDefault && c.status === "archived") return false;
 			return c.location.start_line === line;
 		});
 
@@ -464,6 +493,89 @@ export default class AnnotatedPlugin extends Plugin {
 		modal.open();
 	}
 
+	private addCommentAtCursor(editor: Editor, file: TFile): void {
+		const from = editor.getCursor("from");
+		const to = editor.getCursor("to");
+
+		const location: RangeLocation = {
+			type: "range",
+			start_line: from.line + 1,
+			start_char: from.ch,
+			end_line: to.line + 1,
+			end_char: to.ch,
+		};
+
+		const makeOnSubmit = (loc: RangeLocation) => async (content: string, author: string) => {
+			const now = new Date().toISOString();
+			const comment: Comment = {
+				id: this.commentManager.generateId(),
+				author,
+				created_at: now,
+				updated_at: now,
+				location: loc,
+				content,
+				status: "open",
+				replies: [],
+				last_activity_at: now,
+				content_snippet: captureSnippet(editor.getLine(loc.start_line - 1)),
+			};
+			await this.commentManager.addComment(file.path, comment);
+			await this.refreshGutterForFile(file.path);
+			this.refreshSidebar();
+			new Notice("Comment added");
+		};
+
+		this.openCommentModal(
+			{
+				mode: "create",
+				author: this.settings.defaultAuthor,
+				location,
+				snippet: captureSnippet(editor.getLine(from.line)),
+				onSubmit: makeOnSubmit(location),
+			},
+			{ onSubmitFactory: makeOnSubmit },
+		);
+	}
+
+	private async exportComments(filePath: string): Promise<void> {
+		const commentFile = await this.commentManager.getComments(filePath);
+		if (!commentFile || commentFile.comments.length === 0) {
+			new Notice("No comments to export");
+			return;
+		}
+
+		const filename = filePath.split("/").pop() ?? filePath;
+		const open = commentFile.comments.filter((c) => c.status === "open");
+		const resolved = commentFile.comments.filter((c) => c.status === "resolved");
+
+		const formatDate = (iso: string) => iso.slice(0, 10);
+
+		const formatComment = (c: Comment): string => {
+			const loc = c.location.start_line === c.location.end_line
+				? `Line ${c.location.start_line}`
+				: `Lines ${c.location.start_line}–${c.location.end_line}`;
+			let text = `### ${loc} — ${c.author} (${formatDate(c.created_at)})\n${c.content}`;
+			for (const r of c.replies) {
+				text += `\n  > **${r.author}** (${formatDate(r.created_at)}): ${r.content}`;
+			}
+			return text;
+		};
+
+		let md = `# Comments: ${filename}\n\n`;
+		md += `## Open (${open.length})\n\n`;
+		if (open.length > 0) {
+			md += open.map(formatComment).join("\n\n") + "\n\n";
+		}
+		md += `## Resolved (${resolved.length})\n\n`;
+		if (resolved.length > 0) {
+			md += resolved.map(formatComment).join("\n\n") + "\n\n";
+		}
+
+		await navigator.clipboard.writeText(md.trimEnd());
+		const total = commentFile.comments.length;
+		new Notice(`Exported ${total} comment${total === 1 ? "" : "s"} to clipboard`);
+	}
+
 	handleReply(comment: Comment, targetFilePath?: string): void {
 		const mdView = targetFilePath
 			? this.getMarkdownViewForFile(targetFilePath)
@@ -542,6 +654,9 @@ class AnnotatedSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		containerEl.createEl("h2", { text: "Annotated Settings" });
 
+		// ── Author ──
+		containerEl.createEl("h3", { text: "Author" });
+
 		new Setting(containerEl)
 			.setName("Default author")
 			.setDesc("Author name used when creating comments")
@@ -554,5 +669,97 @@ class AnnotatedSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		// ── Display ──
+		containerEl.createEl("h3", { text: "Display" });
+
+		new Setting(containerEl)
+			.setName("Show gutter indicators")
+			.setDesc("Show comment markers in the editor gutter")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.showGutterIndicators)
+					.onChange(async (value) => {
+						this.plugin.settings.showGutterIndicators = value;
+						await this.plugin.saveSettings();
+						this.refreshActiveGutter();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Comment indicator style")
+			.setDesc("How comments are indicated in the gutter")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("icon", "Icon")
+					.addOption("badge", "Badge")
+					.addOption("highlight", "Highlight")
+					.setValue(this.plugin.settings.commentIndicatorStyle)
+					.onChange(async (value) => {
+						this.plugin.settings.commentIndicatorStyle = value as "icon" | "badge" | "highlight";
+						await this.plugin.saveSettings();
+						this.refreshActiveGutter();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Gutter emoji")
+			.setDesc("Emoji shown in the gutter when using icon style")
+			.addText((text) => {
+				text
+					.setPlaceholder("\u{1F4AC}")
+					.setValue(this.plugin.settings.customGutterEmoji)
+					.onChange(async (value) => {
+						const chars = [...value];
+						const single = chars.length > 0 ? chars[0] : "\u{1F4AC}";
+						this.plugin.settings.customGutterEmoji = single;
+						text.setValue(single);
+						await this.plugin.saveSettings();
+						this.refreshActiveGutter();
+					});
+				text.inputEl.maxLength = 2;
+			});
+
+		new Setting(containerEl)
+			.setName("Max comments in popup")
+			.setDesc("Maximum number of comments shown in the gutter popup")
+			.addSlider((slider) =>
+				slider
+					.setLimits(1, 10, 1)
+					.setValue(this.plugin.settings.maxCommentsInPopup)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.maxCommentsInPopup = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// ── Filtering ──
+		containerEl.createEl("h3", { text: "Filtering" });
+
+		new Setting(containerEl)
+			.setName("Hide resolved by default")
+			.setDesc("Hide resolved comments in the gutter and sidebar")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.hideResolvedByDefault)
+					.onChange(async (value) => {
+						this.plugin.settings.hideResolvedByDefault = value;
+						await this.plugin.saveSettings();
+						this.refreshActiveGutter();
+					})
+			);
+	}
+
+	private refreshActiveGutter(): void {
+		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (mdView?.file) {
+			this.plugin.refreshGutterForFile(mdView.file.path);
+			// Also refresh sidebar
+			const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
+			if (leaves.length > 0) {
+				(leaves[0].view as CommentSidebarView).refresh(mdView.file.path);
+			}
+		}
 	}
 }

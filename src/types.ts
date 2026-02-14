@@ -12,7 +12,7 @@ export type Location = RangeLocation;
 
 // ── Comment Status ─────────────────────────────────────────────
 
-export type CommentStatus = "open" | "resolved" | "archived";
+export type CommentStatus = "open" | "resolved";
 
 // ── Comments ───────────────────────────────────────────────────
 
@@ -47,7 +47,6 @@ export interface CommentFileMetadata {
 	total_comments: number;
 	open_count: number;
 	resolved_count: number;
-	archived_count: number;
 	authors: string[];
 }
 
@@ -65,34 +64,24 @@ export interface CommentFile {
 export interface PluginSettings {
 	// Display
 	showGutterIndicators: boolean;
-	showSidebar: boolean;
-	defaultCommentStatus: "open" | "resolved";
 
 	// Author
 	defaultAuthor: string;
 
-	// File handling
-	autoCreateCommentFile: boolean;
-	commentFileLocation: "adjacent" | "folder";
-
 	// Filtering
 	hideResolvedByDefault: boolean;
-	hideArchivedByDefault: boolean;
 
 	// UI
 	commentIndicatorStyle: "icon" | "badge" | "highlight";
+	customGutterEmoji: string;
 	maxCommentsInPopup: number;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
 	showGutterIndicators: true,
-	showSidebar: true,
-	defaultCommentStatus: "open",
 	defaultAuthor: "claude",
-	autoCreateCommentFile: true,
-	commentFileLocation: "adjacent",
 	hideResolvedByDefault: true,
-	hideArchivedByDefault: true,
 	commentIndicatorStyle: "icon",
+	customGutterEmoji: "\u{1F4AC}",
 	maxCommentsInPopup: 3,
 };
