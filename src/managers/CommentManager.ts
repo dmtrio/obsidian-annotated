@@ -55,6 +55,11 @@ export class CommentManager {
 		comment.replies.push(reply);
 		comment.updated_at = new Date().toISOString();
 		comment.last_activity_at = reply.created_at;
+		if (comment.status === "resolved") {
+			comment.status = "open";
+			comment.resolved_at = undefined;
+			comment.resolved_by = undefined;
+		}
 		await this.saveComments(commentFile);
 	}
 

@@ -297,32 +297,33 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background-color: var(--background-primary);
+  background-color: var(--interactive-accent);
   border-bottom: 1px solid var(--background-modifier-border);
   cursor: pointer;
   user-select: none;
 }
 
 .annotated-sidebar-accordion-header:hover {
-  background-color: var(--background-primary-alt);
+  opacity: 0.9;
 }
 
 .annotated-sidebar-accordion-caret {
   font-size: 10px;
   width: 14px;
   text-align: center;
-  color: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 .annotated-sidebar-accordion-title {
   font-weight: 700;
   font-size: var(--font-ui-small);
-  color: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 .annotated-sidebar-accordion-count {
   font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  color: var(--text-on-accent);
+  opacity: 0.8;
   margin-left: auto;
 }
 
