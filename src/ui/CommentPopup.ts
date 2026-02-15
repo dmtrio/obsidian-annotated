@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { Comment, PluginSettings } from "../types";
-
-declare const moment: typeof import("moment");
+import { formatTimestamp, getCommentActivityTime } from "../utils/FormatUtils";
+import { strings } from "../i18n/strings";
 
 export interface CommentPopupCallbacks {
 	onReply: (comment: Comment) => void;
@@ -137,8 +137,8 @@ export class CommentPopup {
 				const sortRow = container.createDiv({ cls: "annotated-popup-sort" });
 				const sortSelect = sortRow.createEl("select");
 				for (const opt of [
-					{ value: "oldest", label: "Oldest first" },
-					{ value: "newest", label: "Newest first" },
+					{ value: "oldest", label: strings.sort.oldestFirst },
+					{ value: "newest", label: strings.sort.newestFirst },
 				]) {
 					const el = sortSelect.createEl("option", { text: opt.label, value: opt.value });
 					if (opt.value === this.sortMode) el.selected = true;
@@ -158,7 +158,7 @@ export class CommentPopup {
 			if (!showAll && toShow.length < comments.length) {
 				const remaining = comments.length - toShow.length;
 				const showMoreEl = container.createDiv({ cls: "annotated-popup-show-more" });
-				showMoreEl.textContent = `Show ${remaining} more\u2026`;
+				showMoreEl.textContent = strings.popup.showMore(remaining);
 				showMoreEl.addEventListener("click", () => {
 					const sorted = this.sortComments([...comments]);
 					render(sorted);
@@ -175,14 +175,10 @@ export class CommentPopup {
 	}
 
 	private sortComments(comments: Comment[]): Comment[] {
-		const getTime = (c: Comment) => {
-			if (c.last_activity_at) return new Date(c.last_activity_at).getTime();
-			return new Date(c.created_at).getTime();
-		};
 		if (this.sortMode === "newest") {
-			comments.sort((a, b) => getTime(b) - getTime(a));
+			comments.sort((a, b) => getCommentActivityTime(b) - getCommentActivityTime(a));
 		} else {
-			comments.sort((a, b) => getTime(a) - getTime(b));
+			comments.sort((a, b) => getCommentActivityTime(a) - getCommentActivityTime(b));
 		}
 		return comments;
 	}
@@ -199,7 +195,7 @@ export class CommentPopup {
 		if (isStale) {
 			card.createDiv({
 				cls: "annotated-popup-stale-notice",
-				text: "This comment may have drifted from its original location.",
+				text: strings.popup.staleNotice,
 			});
 		}
 
@@ -208,7 +204,7 @@ export class CommentPopup {
 		header.createSpan({ cls: "annotated-popup-author", text: comment.author });
 		header.createSpan({
 			cls: "annotated-popup-timestamp",
-			text: this.formatTimestamp(comment.created_at),
+			text: formatTimestamp(comment.created_at),
 		});
 
 		// Body
@@ -220,11 +216,11 @@ export class CommentPopup {
 			const toggleRow = card.createDiv({ cls: "annotated-popup-replies-toggle" });
 			const arrow = toggleRow.createSpan({ cls: "annotated-popup-replies-toggle-arrow", text: "\u25B6" });
 			toggleRow.createSpan({
-				text: ` ${replyCount} ${replyCount === 1 ? "reply" : "replies"} \u2014 `,
+				text: ` ${strings.replies.count(replyCount)} \u2014 `,
 			});
-			const viewLink = toggleRow.createSpan({ cls: "annotated-popup-replies-toggle-link", text: "view" });
+			const viewLink = toggleRow.createSpan({ cls: "annotated-popup-replies-toggle-link", text: strings.actions.view });
 			toggleRow.createSpan({ text: "\u00A0\u2022\u00A0" });
-			const openThreadLink = toggleRow.createSpan({ cls: "annotated-popup-open-thread", text: "open thread" });
+			const openThreadLink = toggleRow.createSpan({ cls: "annotated-popup-open-thread", text: strings.actions.openThread });
 			openThreadLink.addEventListener("click", (e) => {
 				e.stopPropagation();
 				this.callbacks.onOpenThread(comment);
@@ -238,7 +234,7 @@ export class CommentPopup {
 				replyHeader.createSpan({ cls: "annotated-popup-author", text: reply.author });
 				replyHeader.createSpan({
 					cls: "annotated-popup-timestamp",
-					text: this.formatTimestamp(reply.created_at),
+					text: formatTimestamp(reply.created_at),
 				});
 				replyEl.createDiv({ cls: "annotated-popup-content", text: reply.content });
 			}
@@ -248,11 +244,11 @@ export class CommentPopup {
 				if (isHidden) {
 					repliesContainer.removeClass("annotated-popup-replies--hidden");
 					arrow.setText("\u25BC");
-					viewLink.setText("hide");
+					viewLink.setText(strings.actions.hide);
 				} else {
 					repliesContainer.addClass("annotated-popup-replies--hidden");
 					arrow.setText("\u25B6");
-					viewLink.setText("view");
+					viewLink.setText(strings.actions.view);
 				}
 			};
 
@@ -265,24 +261,16 @@ export class CommentPopup {
 
 		const replyBtn = actions.createEl("button", {
 			cls: "annotated-popup-btn",
-			text: "Reply",
+			text: strings.actions.reply,
 		});
 		replyBtn.addEventListener("click", () => this.callbacks.onReply(comment));
 
 		if (comment.status === "open") {
 			const resolveBtn = actions.createEl("button", {
 				cls: "annotated-popup-btn annotated-popup-btn--resolve",
-				text: "Resolve",
+				text: strings.actions.resolve,
 			});
 			resolveBtn.addEventListener("click", () => this.callbacks.onResolve(comment));
 		}
-	}
-
-	private formatTimestamp(iso: string): string {
-		const m = moment(iso);
-		if (m.isSame(moment(), "day")) {
-			return m.format("h:mm A");
-		}
-		return m.format("MMM D, h:mm A");
 	}
 }

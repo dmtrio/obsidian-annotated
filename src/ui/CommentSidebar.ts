@@ -1,8 +1,8 @@
 import { ItemView, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { Comment, CommentFile } from "../types";
 import type AnnotatedPlugin from "../main";
-
-declare const moment: typeof import("moment");
+import { formatTimestamp, formatLocationText, getCommentActivityTime, truncateContent } from "../utils/FormatUtils";
+import { strings } from "../i18n/strings";
 
 export const VIEW_TYPE_COMMENT_SIDEBAR = "annotated-sidebar";
 
@@ -126,13 +126,13 @@ export class CommentSidebarView extends ItemView {
       const parts = this.currentFilePath.split("/");
       header.setText(parts[parts.length - 1]);
     } else {
-      header.setText("No active note");
+      header.setText(strings.sidebar.noActiveNote);
     }
 
     if (!this.currentFilePath) {
       container.createDiv({
         cls: "annotated-sidebar-empty",
-        text: "Open a note to see comments",
+        text: strings.sidebar.openNoteToSee,
       });
       return;
     }
@@ -150,7 +150,7 @@ export class CommentSidebarView extends ItemView {
       cls: "annotated-sidebar-filter",
     });
     const allOpt = authorSelect.createEl("option", {
-      text: "All authors",
+      text: strings.sidebar.allAuthors,
       value: "",
     });
     if (!this.authorFilter) allOpt.selected = true;
@@ -171,9 +171,9 @@ export class CommentSidebarView extends ItemView {
       cls: "annotated-sidebar-filter",
     });
     for (const opt of [
-      { value: "line", label: "Line number" },
-      { value: "oldest", label: "Oldest" },
-      { value: "newest", label: "Newest" },
+      { value: "line", label: strings.sort.line },
+      { value: "oldest", label: strings.sort.oldest },
+      { value: "newest", label: strings.sort.newest },
     ]) {
       const el = sortSelect.createEl("option", {
         text: opt.label,
@@ -215,7 +215,7 @@ export class CommentSidebarView extends ItemView {
     const header = container.createDiv({ cls: "annotated-thread-header" });
     const backBtn = header.createEl("button", {
       cls: "annotated-thread-back",
-      text: "\u2190 Comments",
+      text: strings.sidebar.backToComments,
     });
     backBtn.addEventListener("click", () => {
       this.viewMode = "list";
@@ -226,18 +226,13 @@ export class CommentSidebarView extends ItemView {
     const body = container.createDiv({ cls: "annotated-thread-body" });
 
     // Location
-    const loc = comment.location;
-    const locText =
-      loc.start_line === loc.end_line
-        ? `Line ${loc.start_line}`
-        : `Lines ${loc.start_line}\u2013${loc.end_line}`;
-    body.createDiv({ cls: "annotated-sidebar-card-location", text: locText });
+    body.createDiv({ cls: "annotated-sidebar-card-location", text: formatLocationText(comment.location) });
 
     // Stale notice
     if (comment.is_stale) {
       body.createDiv({
         cls: "annotated-popup-stale-notice",
-        text: "\u26A0 Location may have shifted",
+        text: strings.sidebar.staleNotice,
       });
     }
 
@@ -249,7 +244,7 @@ export class CommentSidebarView extends ItemView {
     });
     headerEl.createSpan({
       cls: "annotated-popup-timestamp",
-      text: this.formatTimestamp(comment.created_at),
+      text: formatTimestamp(comment.created_at),
     });
 
     // Full content (not truncated)
@@ -273,7 +268,7 @@ export class CommentSidebarView extends ItemView {
         });
         replyHeader.createSpan({
           cls: "annotated-popup-timestamp",
-          text: this.formatTimestamp(reply.created_at),
+          text: formatTimestamp(reply.created_at),
         });
         replyEl.createDiv({
           cls: "annotated-thread-content",
@@ -288,7 +283,7 @@ export class CommentSidebarView extends ItemView {
 
     const replyBtn = actions.createEl("button", {
       cls: "annotated-popup-btn",
-      text: "Reply",
+      text: strings.actions.reply,
     });
     replyBtn.addEventListener("click", () => {
       this.plugin.handleReply(comment, filePath ?? undefined);
@@ -297,7 +292,7 @@ export class CommentSidebarView extends ItemView {
     if (comment.status === "open") {
       const resolveBtn = actions.createEl("button", {
         cls: "annotated-popup-btn annotated-popup-btn--resolve",
-        text: "Resolve",
+        text: strings.actions.resolve,
       });
       resolveBtn.addEventListener("click", () => {
         this.plugin.handleResolve(comment, filePath ?? undefined);
@@ -312,7 +307,7 @@ export class CommentSidebarView extends ItemView {
     if (!commentFile || commentFile.comments.length === 0) {
       container.createDiv({
         cls: "annotated-sidebar-empty",
-        text: "No comments on this note",
+        text: strings.sidebar.noComments,
       });
       return;
     }
@@ -326,7 +321,7 @@ export class CommentSidebarView extends ItemView {
     if (filtered.length === 0) {
       container.createDiv({
         cls: "annotated-sidebar-empty",
-        text: "No matching comments",
+        text: strings.sidebar.noMatching,
       });
       return;
     }
@@ -339,12 +334,12 @@ export class CommentSidebarView extends ItemView {
         break;
       case "oldest":
         sorted.sort(
-          (a, b) => this.getActivityTime(a) - this.getActivityTime(b),
+          (a, b) => getCommentActivityTime(a) - getCommentActivityTime(b),
         );
         break;
       case "newest":
         sorted.sort(
-          (a, b) => this.getActivityTime(b) - this.getActivityTime(a),
+          (a, b) => getCommentActivityTime(b) - getCommentActivityTime(a),
         );
         break;
     }
@@ -353,31 +348,18 @@ export class CommentSidebarView extends ItemView {
     const resolved = sorted.filter((c) => c.status === "resolved");
 
     // Always render both accordions (even if empty, to show the header with count 0)
-    this.renderAccordion(container, "Open", open, this.showOpen, (val) => {
+    this.renderAccordion(container, strings.sidebar.open, open, this.showOpen, (val) => {
       this.showOpen = val;
     });
     this.renderAccordion(
       container,
-      "Resolved",
+      strings.sidebar.resolved,
       resolved,
       this.showResolved,
       (val) => {
         this.showResolved = val;
       },
     );
-  }
-
-  /** Get the activity timestamp in ms, using last_activity_at with fallback. */
-  private getActivityTime(comment: Comment): number {
-    if (comment.last_activity_at) {
-      return new Date(comment.last_activity_at).getTime();
-    }
-    // Fallback for older comments without last_activity_at
-    if (comment.replies.length > 0) {
-      const lastReply = comment.replies[comment.replies.length - 1];
-      return new Date(lastReply.created_at).getTime();
-    }
-    return new Date(comment.created_at).getTime();
   }
 
   private renderAccordion(
@@ -411,7 +393,7 @@ export class CommentSidebarView extends ItemView {
     if (comments.length === 0) {
       body.createDiv({
         cls: "annotated-sidebar-empty",
-        text: `No ${title.toLowerCase()} comments`,
+        text: strings.sidebar.noSection(title),
       });
     } else {
       for (const comment of comments) {
@@ -452,12 +434,7 @@ export class CommentSidebarView extends ItemView {
     });
 
     // Location
-    const loc = comment.location;
-    const locText =
-      loc.start_line === loc.end_line
-        ? `Line ${loc.start_line}`
-        : `Lines ${loc.start_line}\u2013${loc.end_line}`;
-    card.createDiv({ cls: "annotated-sidebar-card-location", text: locText });
+    card.createDiv({ cls: "annotated-sidebar-card-location", text: formatLocationText(comment.location) });
 
     // Header: author + timestamp
     const headerEl = card.createDiv({ cls: "annotated-popup-header" });
@@ -467,22 +444,18 @@ export class CommentSidebarView extends ItemView {
     });
     headerEl.createSpan({
       cls: "annotated-popup-timestamp",
-      text: this.formatTimestamp(comment.created_at),
+      text: formatTimestamp(comment.created_at),
     });
 
     if (comment.is_stale) {
       card.createDiv({
         cls: "annotated-popup-stale-notice",
-        text: "\u26A0 Location may have shifted",
+        text: strings.sidebar.staleNotice,
       });
     }
 
     // Content preview (truncated)
-    const preview =
-      comment.content.length > 120
-        ? comment.content.slice(0, 120) + "\u2026"
-        : comment.content;
-    card.createDiv({ cls: "annotated-sidebar-card-content", text: preview });
+    card.createDiv({ cls: "annotated-sidebar-card-content", text: truncateContent(comment.content) });
 
     // Collapsible reply chain with open thread link
     if (comment.replies.length > 0) {
@@ -495,16 +468,16 @@ export class CommentSidebarView extends ItemView {
         text: "\u25B6",
       });
       toggleEl.createSpan({
-        text: ` ${replyCount} ${replyCount === 1 ? "reply" : "replies"} \u2014 `,
+        text: ` ${strings.replies.count(replyCount)} \u2014 `,
       });
       const viewLink = toggleEl.createSpan({
         cls: "annotated-sidebar-replies-link",
-        text: "view",
+        text: strings.actions.view,
       });
       toggleEl.createSpan({ text: "\u00A0\u2022\u00A0" });
       const openThreadLink = toggleEl.createSpan({
         cls: "annotated-popup-open-thread",
-        text: "open thread",
+        text: strings.actions.openThread,
       });
       openThreadLink.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -530,15 +503,11 @@ export class CommentSidebarView extends ItemView {
         });
         replyHeader.createSpan({
           cls: "annotated-popup-timestamp",
-          text: this.formatTimestamp(reply.created_at),
+          text: formatTimestamp(reply.created_at),
         });
-        const replyContent =
-          reply.content.length > 120
-            ? reply.content.slice(0, 120) + "\u2026"
-            : reply.content;
         replyEl.createDiv({
           cls: "annotated-sidebar-card-content",
-          text: replyContent,
+          text: truncateContent(reply.content),
         });
       }
 
@@ -549,11 +518,11 @@ export class CommentSidebarView extends ItemView {
         if (isHidden) {
           repliesContainer.removeClass("annotated-sidebar-replies--hidden");
           arrow.setText("\u25BC");
-          viewLink.setText("hide");
+          viewLink.setText(strings.actions.hide);
         } else {
           repliesContainer.addClass("annotated-sidebar-replies--hidden");
           arrow.setText("\u25B6");
-          viewLink.setText("view");
+          viewLink.setText(strings.actions.view);
         }
       };
 
@@ -573,7 +542,7 @@ export class CommentSidebarView extends ItemView {
 
     const replyBtn = actions.createEl("button", {
       cls: "annotated-popup-btn",
-      text: "Reply",
+      text: strings.actions.reply,
     });
     replyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -583,7 +552,7 @@ export class CommentSidebarView extends ItemView {
     if (comment.status === "open") {
       const resolveBtn = actions.createEl("button", {
         cls: "annotated-popup-btn annotated-popup-btn--resolve",
-        text: "Resolve",
+        text: strings.actions.resolve,
       });
       resolveBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -602,13 +571,5 @@ export class CommentSidebarView extends ItemView {
     const line = comment.location.start_line - 1;
     editor.setCursor({ line, ch: 0 });
     editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
-  }
-
-  private formatTimestamp(iso: string): string {
-    const m = moment(iso);
-    if (m.isSame(moment(), "day")) {
-      return m.format("h:mm A");
-    }
-    return m.format("MMM D, h:mm A");
   }
 }

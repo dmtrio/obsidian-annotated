@@ -33,6 +33,8 @@ import {
   CommentLineMap,
 } from "./editor/CommentGutterExtension";
 import { captureSnippet, findLineBySnippet } from "./utils/SnippetMatcher";
+import { formatLocationText } from "./utils/FormatUtils";
+import { strings } from "./i18n/strings";
 import {
   commentTrackerField,
   commentPositionTrackerPlugin,
@@ -85,19 +87,19 @@ export default class AnnotatedPlugin extends Plugin {
 
     this.addCommand({
       id: "toggle-comment-sidebar",
-      name: "Toggle Comment Sidebar",
+      name: strings.commands.toggleSidebar,
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "/" }],
       callback: () => this.toggleSidebar(),
     });
 
     this.addCommand({
       id: "add-comment",
-      name: "Add Comment",
+      name: strings.commands.addComment,
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
       editorCallback: (editor: Editor, view: MarkdownView) => {
         const file = view.file;
         if (!file) {
-          new Notice("No active file");
+          new Notice(strings.notices.noActiveFile);
           return;
         }
         this.addCommentAtCursor(editor, file);
@@ -106,7 +108,7 @@ export default class AnnotatedPlugin extends Plugin {
 
     this.addCommand({
       id: "export-comments",
-      name: "Export Comments to Clipboard",
+      name: strings.commands.exportComments,
       checkCallback: (checking: boolean) => {
         const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (!mdView?.file) return false;
@@ -192,7 +194,7 @@ export default class AnnotatedPlugin extends Plugin {
         const file = mdView.file;
         menu.addItem((item) => {
           item
-            .setTitle("Add Comment")
+            .setTitle(strings.commands.addComment)
             .setIcon("message-square")
             .onClick(() => this.addCommentAtCursor(editor, file));
         });
@@ -503,7 +505,7 @@ export default class AnnotatedPlugin extends Plugin {
         const draft = modal.getDraftContent();
         modal.close();
 
-        new Notice("Select new location in the editor");
+        new Notice(strings.notices.reselectLocation);
 
         const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
         const editorDom = mdView
@@ -521,7 +523,7 @@ export default class AnnotatedPlugin extends Plugin {
 
         const timeout = window.setTimeout(() => {
           cleanup();
-          new Notice("Re-select cancelled");
+          new Notice(strings.notices.reselectCancelled);
         }, 10000);
 
         const onMouseUp = () => {
@@ -600,7 +602,7 @@ export default class AnnotatedPlugin extends Plugin {
         await this.commentManager.addComment(file.path, comment);
         await this.refreshGutterForFile(file.path);
         this.refreshSidebar();
-        new Notice("Comment added");
+        new Notice(strings.notices.commentAdded);
       };
 
     this.openCommentModal(
@@ -618,7 +620,7 @@ export default class AnnotatedPlugin extends Plugin {
   private async exportComments(filePath: string): Promise<void> {
     const commentFile = await this.commentManager.getComments(filePath);
     if (!commentFile || commentFile.comments.length === 0) {
-      new Notice("No comments to export");
+      new Notice(strings.notices.noCommentsToExport);
       return;
     }
 
@@ -631,10 +633,7 @@ export default class AnnotatedPlugin extends Plugin {
     const formatDate = (iso: string) => iso.slice(0, 10);
 
     const formatComment = (c: Comment): string => {
-      const loc =
-        c.location.start_line === c.location.end_line
-          ? `Line ${c.location.start_line}`
-          : `Lines ${c.location.start_line}–${c.location.end_line}`;
+      const loc = formatLocationText(c.location);
       let text = `### ${loc} — ${c.author} (${formatDate(c.created_at)})\n${c.content}`;
       for (const r of c.replies) {
         text += `\n  > **${r.author}** (${formatDate(r.created_at)}): ${r.content}`;
@@ -655,13 +654,9 @@ export default class AnnotatedPlugin extends Plugin {
     try {
       await navigator.clipboard.writeText(md.trimEnd());
       const total = commentFile.comments.length;
-      new Notice(
-        `Exported ${total} comment${total === 1 ? "" : "s"} to clipboard`,
-      );
+      new Notice(strings.notices.exportSuccess(total));
     } catch {
-      new Notice(
-        "Failed to copy to clipboard — your browser may have blocked access",
-      );
+      new Notice(strings.notices.exportFailed);
     }
   }
 
@@ -743,17 +738,17 @@ class AnnotatedSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Annotated Settings" });
+    containerEl.createEl("h2", { text: strings.settings.heading });
 
     // ── Author ──
-    containerEl.createEl("h3", { text: "Author" });
+    containerEl.createEl("h3", { text: strings.settings.sections.author });
 
     new Setting(containerEl)
-      .setName("Default author")
-      .setDesc("Author name used when creating comments")
+      .setName(strings.settings.defaultAuthor.name)
+      .setDesc(strings.settings.defaultAuthor.desc)
       .addText((text) =>
         text
-          .setPlaceholder("author")
+          .setPlaceholder(strings.settings.defaultAuthor.placeholder)
           .setValue(this.plugin.settings.defaultAuthor)
           .onChange(async (value) => {
             this.plugin.settings.defaultAuthor = value;
@@ -762,11 +757,11 @@ class AnnotatedSettingTab extends PluginSettingTab {
       );
 
     // ── Display ──
-    containerEl.createEl("h3", { text: "Display" });
+    containerEl.createEl("h3", { text: strings.settings.sections.display });
 
     new Setting(containerEl)
-      .setName("Show gutter indicators")
-      .setDesc("Show comment markers in the editor gutter")
+      .setName(strings.settings.showGutter.name)
+      .setDesc(strings.settings.showGutter.desc)
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showGutterIndicators)
@@ -778,13 +773,13 @@ class AnnotatedSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Comment indicator style")
-      .setDesc("How comments are indicated in the gutter")
+      .setName(strings.settings.indicatorStyle.name)
+      .setDesc(strings.settings.indicatorStyle.desc)
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("icon", "Icon")
-          .addOption("badge", "Badge")
-          .addOption("highlight", "Highlight")
+          .addOption("icon", strings.settings.indicatorOptions.icon)
+          .addOption("badge", strings.settings.indicatorOptions.badge)
+          .addOption("highlight", strings.settings.indicatorOptions.highlight)
           .setValue(this.plugin.settings.commentIndicatorStyle)
           .onChange(async (value) => {
             this.plugin.settings.commentIndicatorStyle = value as
@@ -797,11 +792,11 @@ class AnnotatedSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Gutter emoji")
-      .setDesc("Emoji shown in the gutter when using icon style")
+      .setName(strings.settings.gutterEmoji.name)
+      .setDesc(strings.settings.gutterEmoji.desc)
       .addText((text) => {
         text
-          .setPlaceholder("Enter emoji")
+          .setPlaceholder(strings.settings.gutterEmoji.placeholder)
           .setValue(
             this.plugin.settings.customGutterEmoji === "\u{1F4AC}"
               ? ""
@@ -821,8 +816,8 @@ class AnnotatedSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Max comments in popup")
-      .setDesc("Maximum number of comments shown in the gutter popup")
+      .setName(strings.settings.maxPopup.name)
+      .setDesc(strings.settings.maxPopup.desc)
       .addSlider((slider) =>
         slider
           .setLimits(1, 10, 1)
@@ -835,13 +830,13 @@ class AnnotatedSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Default sort order")
-      .setDesc("How comments are sorted in the sidebar by default")
+      .setName(strings.settings.defaultSort.name)
+      .setDesc(strings.settings.defaultSort.desc)
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("line", "Line number")
-          .addOption("oldest", "Oldest")
-          .addOption("newest", "Newest")
+          .addOption("line", strings.sort.line)
+          .addOption("oldest", strings.sort.oldest)
+          .addOption("newest", strings.sort.newest)
           .setValue(this.plugin.settings.defaultSortMode)
           .onChange(async (value) => {
             this.plugin.settings.defaultSortMode = value as
@@ -853,11 +848,11 @@ class AnnotatedSettingTab extends PluginSettingTab {
       );
 
     // ── Filtering ──
-    containerEl.createEl("h3", { text: "Filtering" });
+    containerEl.createEl("h3", { text: strings.settings.sections.filtering });
 
     new Setting(containerEl)
-      .setName("Hide resolved by default")
-      .setDesc("Hide resolved comments in the gutter and sidebar")
+      .setName(strings.settings.hideResolved.name)
+      .setDesc(strings.settings.hideResolved.desc)
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.hideResolvedByDefault)

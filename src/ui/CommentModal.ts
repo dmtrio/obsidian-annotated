@@ -1,5 +1,7 @@
 import { App, Modal } from "obsidian";
 import { RangeLocation } from "../types";
+import { formatLocationText } from "../utils/FormatUtils";
+import { strings } from "../i18n/strings";
 
 export interface CommentModalOptions {
 	mode: "create" | "reply";
@@ -32,14 +34,14 @@ export class CommentModal extends Modal {
 
 		// Header
 		if (opts.mode === "reply" && opts.replyingTo) {
-			contentEl.createEl("h3", { text: `Reply to ${opts.replyingTo}` });
+			contentEl.createEl("h3", { text: strings.modal.replyTo(opts.replyingTo) });
 		} else {
-			contentEl.createEl("h3", { text: "Add Comment" });
+			contentEl.createEl("h3", { text: strings.modal.addComment });
 		}
 
 		// Author field
 		const authorContainer = contentEl.createDiv({ cls: "annotated-modal-author" });
-		authorContainer.createEl("label", { text: "Author" });
+		authorContainer.createEl("label", { text: strings.modal.authorLabel });
 		const authorInput = authorContainer.createEl("input", {
 			type: "text",
 			value: opts.author,
@@ -49,15 +51,11 @@ export class CommentModal extends Modal {
 		// Location bar (create mode only)
 		if (opts.mode === "create" && opts.location) {
 			const locBar = contentEl.createDiv({ cls: "annotated-modal-location" });
-			const loc = opts.location;
-			const locText = loc.start_line === loc.end_line
-				? `Line ${loc.start_line}`
-				: `Lines ${loc.start_line}\u2013${loc.end_line}`;
-			locBar.createSpan({ text: locText });
+			locBar.createSpan({ text: formatLocationText(opts.location) });
 
 			if (opts.onReselect) {
 				const reselectBtn = locBar.createEl("button", {
-					text: "Re-select",
+					text: strings.modal.reselect,
 					cls: "annotated-modal-reselect-btn",
 				});
 				reselectBtn.addEventListener("click", () => {
@@ -79,7 +77,7 @@ export class CommentModal extends Modal {
 
 		// Textarea
 		const textarea = contentEl.createEl("textarea", {
-			attr: { placeholder: "Enter your comment...", rows: "5" },
+			attr: { placeholder: strings.modal.placeholder, rows: "5" },
 		});
 		textarea.style.width = "100%";
 		this.textarea = textarea;
@@ -101,11 +99,11 @@ export class CommentModal extends Modal {
 		// Button row
 		const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
 
-		buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
+		buttonRow.createEl("button", { text: strings.modal.cancel }).addEventListener("click", () => {
 			this.close();
 		});
 
-		const submitBtn = buttonRow.createEl("button", { text: "Submit", cls: "mod-cta" });
+		const submitBtn = buttonRow.createEl("button", { text: strings.modal.submit, cls: "mod-cta" });
 		submitBtn.addEventListener("click", () => submit());
 
 		const submit = () => {
