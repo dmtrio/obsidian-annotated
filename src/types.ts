@@ -75,6 +75,9 @@ export interface PluginSettings {
 	commentIndicatorStyle: "icon" | "badge" | "highlight";
 	customGutterEmoji: string;
 	maxCommentsInPopup: number;
+
+	// Sorting
+	defaultSortMode: "line" | "oldest" | "newest";
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -84,4 +87,5 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	commentIndicatorStyle: "icon",
 	customGutterEmoji: "\u{1F4AC}",
 	maxCommentsInPopup: 3,
+	defaultSortMode: "line",
 };

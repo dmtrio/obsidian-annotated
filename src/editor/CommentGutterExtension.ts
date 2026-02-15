@@ -3,8 +3,8 @@ import { Extension } from "@codemirror/state";
 import { StateEffect, StateField } from "@codemirror/state";
 import { gutter, GutterMarker } from "@codemirror/view";
 
-/** Per-line info: comment count and whether any are stale */
-export type CommentLineInfo = { count: number; hasStale: boolean };
+/** Per-line info: comment count, stale flag, and whether all are resolved */
+export type CommentLineInfo = { count: number; hasStale: boolean; allResolved: boolean };
 
 /** line (1-indexed) → comment line info */
 export type CommentLineMap = Map<number, CommentLineInfo>;
@@ -66,13 +66,14 @@ export const commentLineField = StateField.define<CommentLineMap>({
 				// Convert back to line number
 				if (newPos < 0 || newPos > doc.length) continue;
 				const newLine = doc.lineAt(newPos).number;
-				// Merge: sum counts, OR stale flags
+				// Merge: sum counts, OR stale flags, AND allResolved flags
 				const existing = newMap.get(newLine);
 				if (existing) {
 					existing.count += info.count;
 					existing.hasStale = existing.hasStale || info.hasStale;
+					existing.allResolved = existing.allResolved && info.allResolved;
 				} else {
-					newMap.set(newLine, { count: info.count, hasStale: info.hasStale });
+					newMap.set(newLine, { count: info.count, hasStale: info.hasStale, allResolved: info.allResolved });
 				}
 			}
 			return newMap;
@@ -86,6 +87,7 @@ class CommentGutterMarker extends GutterMarker {
 	constructor(
 		readonly count: number,
 		readonly hasStale: boolean,
+		readonly allResolved: boolean,
 		readonly config: GutterConfig,
 	) {
 		super();
@@ -94,29 +96,31 @@ class CommentGutterMarker extends GutterMarker {
 	eq(other: CommentGutterMarker): boolean {
 		return this.count === other.count
 			&& this.hasStale === other.hasStale
+			&& this.allResolved === other.allResolved
 			&& this.config.style === other.config.style
 			&& this.config.emoji === other.config.emoji;
 	}
 
 	toDOM(): Node {
 		const wrapper = document.createElement("div");
+		const resolvedClass = (this.allResolved && !this.hasStale) ? " cm-annotated-gutter-marker--resolved" : "";
 
 		if (this.config.style === "highlight") {
 			wrapper.className = "cm-annotated-gutter-marker cm-annotated-gutter-marker--highlight" +
-				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "") + resolvedClass;
 			return wrapper;
 		}
 
 		if (this.config.style === "badge") {
 			wrapper.className = "cm-annotated-gutter-marker cm-annotated-gutter-marker--badge-style" +
-				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+				(this.hasStale ? " cm-annotated-gutter-marker--stale" : "") + resolvedClass;
 			wrapper.textContent = this.hasStale ? "\u26A0" : String(this.count);
 			return wrapper;
 		}
 
 		// Default: icon style — use custom emoji
 		wrapper.className = "cm-annotated-gutter-marker" +
-			(this.hasStale ? " cm-annotated-gutter-marker--stale" : "");
+			(this.hasStale ? " cm-annotated-gutter-marker--stale" : "") + resolvedClass;
 		wrapper.textContent = this.hasStale ? "\u26A0" : this.config.emoji;
 		if (this.count > 1) {
 			const badge = wrapper.createSpan({ cls: "cm-annotated-gutter-badge" });
@@ -128,13 +132,13 @@ class CommentGutterMarker extends GutterMarker {
 
 const defaultConfig: GutterConfig = { style: "icon", emoji: "\u{1F4AC}" };
 
-// Cache markers by count+stale+style+emoji to avoid re-creating DOM
+// Cache markers by count+stale+resolved+style+emoji to avoid re-creating DOM
 const markerCache = new Map<string, CommentGutterMarker>();
-function getMarker(count: number, hasStale: boolean, config: GutterConfig): CommentGutterMarker {
-	const key = `${count}:${hasStale ? 1 : 0}:${config.style}:${config.emoji}`;
+function getMarker(count: number, hasStale: boolean, allResolved: boolean, config: GutterConfig): CommentGutterMarker {
+	const key = `${count}:${hasStale ? 1 : 0}:${allResolved ? 1 : 0}:${config.style}:${config.emoji}`;
 	let m = markerCache.get(key);
 	if (!m) {
-		m = new CommentGutterMarker(count, hasStale, config);
+		m = new CommentGutterMarker(count, hasStale, allResolved, config);
 		markerCache.set(key, m);
 	}
 	return m;
@@ -156,7 +160,7 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 				const info = map.get(lineNum);
 				if (!info) return null;
 				const config = view.state.field(gutterConfigField);
-				return getMarker(info.count, info.hasStale, config);
+				return getMarker(info.count, info.hasStale, info.allResolved, config);
 			},
 			domEventHandlers: {
 				click(view, line) {
@@ -169,7 +173,7 @@ export function createCommentGutterExtension(onClick: GutterClickCallback): Exte
 					return true;
 				},
 			},
-			initialSpacer: () => getMarker(1, false, defaultConfig),
+			initialSpacer: () => getMarker(1, false, false, defaultConfig),
 		}),
 	];
 }

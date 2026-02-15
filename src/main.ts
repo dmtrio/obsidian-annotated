@@ -55,6 +55,7 @@ export default class AnnotatedPlugin extends Plugin {
     this.commentPopup = new CommentPopup(this.settings, {
       onReply: (comment) => this.handleReply(comment),
       onResolve: (comment) => this.handleResolve(comment),
+      onOpenThread: (comment) => this.openThreadInSidebar(comment),
     });
 
     // Register CM6 gutter extension
@@ -249,6 +250,21 @@ export default class AnnotatedPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
+  private async openThreadInSidebar(comment: Comment): Promise<void> {
+    // Ensure sidebar is open
+    let leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
+    if (leaves.length === 0) {
+      const leaf = this.app.workspace.getRightLeaf(false);
+      if (!leaf) return;
+      await leaf.setViewState({ type: VIEW_TYPE_COMMENT_SIDEBAR, active: true });
+      this.app.workspace.revealLeaf(leaf);
+      leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
+    }
+    if (leaves.length === 0) return;
+    const sidebarView = leaves[0].view as CommentSidebarView;
+    sidebarView.openThread(comment.id);
+  }
+
   private refreshSidebar(filePath?: string): void {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_COMMENT_SIDEBAR,
@@ -269,12 +285,14 @@ export default class AnnotatedPlugin extends Plugin {
           continue;
 
         const line = c.location.start_line;
+        const isResolved = c.status === "resolved";
         const existing = lineMap.get(line);
         if (existing) {
           existing.count += 1;
           existing.hasStale = existing.hasStale || c.is_stale === true;
+          existing.allResolved = existing.allResolved && isResolved;
         } else {
-          lineMap.set(line, { count: 1, hasStale: c.is_stale === true });
+          lineMap.set(line, { count: 1, hasStale: c.is_stale === true, allResolved: isResolved });
         }
       }
     }
@@ -812,6 +830,24 @@ class AnnotatedSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.maxCommentsInPopup = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Default sort order")
+      .setDesc("How comments are sorted in the sidebar by default")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("line", "Line number")
+          .addOption("oldest", "Oldest")
+          .addOption("newest", "Newest")
+          .setValue(this.plugin.settings.defaultSortMode)
+          .onChange(async (value) => {
+            this.plugin.settings.defaultSortMode = value as
+              | "line"
+              | "oldest"
+              | "newest";
             await this.plugin.saveSettings();
           }),
       );

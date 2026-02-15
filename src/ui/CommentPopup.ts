@@ -6,6 +6,7 @@ declare const moment: typeof import("moment");
 export interface CommentPopupCallbacks {
 	onReply: (comment: Comment) => void;
 	onResolve: (comment: Comment) => void;
+	onOpenThread: (comment: Comment) => void;
 }
 
 export class CommentPopup {
@@ -16,6 +17,7 @@ export class CommentPopup {
 	private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 	private scrollHandler: (() => void) | null = null;
 	private scrollDOM: HTMLElement | null = null;
+	private sortMode: "oldest" | "newest" = "oldest";
 
 	constructor(settings: PluginSettings, callbacks: CommentPopupCallbacks) {
 		this.settings = settings;
@@ -31,6 +33,7 @@ export class CommentPopup {
 
 		this.close();
 		this.currentLine = line;
+		this.sortMode = "oldest";
 
 		const container = document.createElement("div");
 		container.className = "annotated-comment-popup";
@@ -129,6 +132,25 @@ export class CommentPopup {
 		const render = (toShow: Comment[]) => {
 			container.empty();
 
+			// Sort dropdown when multiple comments
+			if (comments.length > 1) {
+				const sortRow = container.createDiv({ cls: "annotated-popup-sort" });
+				const sortSelect = sortRow.createEl("select");
+				for (const opt of [
+					{ value: "oldest", label: "Oldest first" },
+					{ value: "newest", label: "Newest first" },
+				]) {
+					const el = sortSelect.createEl("option", { text: opt.label, value: opt.value });
+					if (opt.value === this.sortMode) el.selected = true;
+				}
+				sortSelect.addEventListener("change", () => {
+					this.sortMode = sortSelect.value as "oldest" | "newest";
+					const sorted = this.sortComments([...comments]);
+					const nextVisible = showAll ? sorted : sorted.slice(0, max);
+					render(nextVisible);
+				});
+			}
+
 			for (const comment of toShow) {
 				this.renderCommentCard(container, comment);
 			}
@@ -137,7 +159,10 @@ export class CommentPopup {
 				const remaining = comments.length - toShow.length;
 				const showMoreEl = container.createDiv({ cls: "annotated-popup-show-more" });
 				showMoreEl.textContent = `Show ${remaining} more\u2026`;
-				showMoreEl.addEventListener("click", () => render(comments));
+				showMoreEl.addEventListener("click", () => {
+					const sorted = this.sortComments([...comments]);
+					render(sorted);
+				});
 			}
 
 			// Close button in top-right
@@ -147,6 +172,19 @@ export class CommentPopup {
 		};
 
 		render(visibleComments);
+	}
+
+	private sortComments(comments: Comment[]): Comment[] {
+		const getTime = (c: Comment) => {
+			if (c.last_activity_at) return new Date(c.last_activity_at).getTime();
+			return new Date(c.created_at).getTime();
+		};
+		if (this.sortMode === "newest") {
+			comments.sort((a, b) => getTime(b) - getTime(a));
+		} else {
+			comments.sort((a, b) => getTime(a) - getTime(b));
+		}
+		return comments;
 	}
 
 	private renderCommentCard(container: HTMLElement, comment: Comment): void {
@@ -176,9 +214,24 @@ export class CommentPopup {
 		// Body
 		card.createDiv({ cls: "annotated-popup-content", text: comment.content });
 
-		// Replies
+		// Replies (collapsible)
 		if (comment.replies.length > 0) {
-			const repliesContainer = card.createDiv({ cls: "annotated-popup-replies" });
+			const replyCount = comment.replies.length;
+			const toggleRow = card.createDiv({ cls: "annotated-popup-replies-toggle" });
+			const arrow = toggleRow.createSpan({ cls: "annotated-popup-replies-toggle-arrow", text: "\u25B6" });
+			toggleRow.createSpan({
+				text: ` ${replyCount} ${replyCount === 1 ? "reply" : "replies"} \u2014 `,
+			});
+			const viewLink = toggleRow.createSpan({ cls: "annotated-popup-replies-toggle-link", text: "view" });
+			toggleRow.createSpan({ text: "\u00A0\u2022\u00A0" });
+			const openThreadLink = toggleRow.createSpan({ cls: "annotated-popup-open-thread", text: "open thread" });
+			openThreadLink.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.callbacks.onOpenThread(comment);
+				this.close();
+			});
+
+			const repliesContainer = card.createDiv({ cls: "annotated-popup-replies annotated-popup-replies--hidden" });
 			for (const reply of comment.replies) {
 				const replyEl = repliesContainer.createDiv({ cls: "annotated-popup-comment" });
 				const replyHeader = replyEl.createDiv({ cls: "annotated-popup-header" });
@@ -189,6 +242,22 @@ export class CommentPopup {
 				});
 				replyEl.createDiv({ cls: "annotated-popup-content", text: reply.content });
 			}
+
+			const toggleFn = () => {
+				const isHidden = repliesContainer.hasClass("annotated-popup-replies--hidden");
+				if (isHidden) {
+					repliesContainer.removeClass("annotated-popup-replies--hidden");
+					arrow.setText("\u25BC");
+					viewLink.setText("hide");
+				} else {
+					repliesContainer.addClass("annotated-popup-replies--hidden");
+					arrow.setText("\u25B6");
+					viewLink.setText("view");
+				}
+			};
+
+			arrow.addEventListener("click", toggleFn);
+			viewLink.addEventListener("click", toggleFn);
 		}
 
 		// Actions

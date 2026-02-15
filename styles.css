@@ -162,13 +162,14 @@
 }
 
 .annotated-popup-btn--resolve {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: var(--interactive-accent);
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  border-color: var(--background-modifier-border);
 }
 
 .annotated-popup-btn--resolve:hover {
-  opacity: 0.9;
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .annotated-popup-btn--close {
@@ -459,4 +460,128 @@
   text-align: center;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+}
+
+/* ── Collapsible popup replies ─────────────────────────────── */
+
+.annotated-popup-replies--hidden { display: none; }
+
+.annotated-popup-replies-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.annotated-popup-replies-toggle:hover {
+  color: var(--text-normal);
+}
+
+.annotated-popup-replies-toggle-arrow {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  transition: transform 100ms ease;
+}
+
+.annotated-popup-replies-toggle-link {
+  color: var(--interactive-accent);
+}
+
+.annotated-popup-replies-toggle-link:hover {
+  text-decoration: underline;
+}
+
+.annotated-popup-open-thread {
+  color: var(--interactive-accent);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.annotated-popup-open-thread:hover {
+  text-decoration: underline;
+}
+
+/* ── Popup sort dropdown ───────────────────────────────────── */
+
+.annotated-popup-sort {
+  padding: 4px 12px 4px;
+}
+
+.annotated-popup-sort select {
+  padding: 2px 6px;
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* ── Resolved gutter marker ────────────────────────────────── */
+
+.cm-annotated-gutter-marker--resolved { opacity: 0.4; }
+
+/* ── Thread view ───────────────────────────────────────────── */
+
+.annotated-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotated-thread-back {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.annotated-thread-back:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.annotated-thread-body {
+  padding: 10px 12px;
+}
+
+.annotated-thread-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+  margin: 6px 0;
+}
+
+.annotated-thread-replies {
+  margin-top: 10px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--interactive-accent);
+}
+
+.annotated-thread-reply {
+  padding: 6px 0;
+}
+
+.annotated-thread-reply + .annotated-thread-reply {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.annotated-thread-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
 }
