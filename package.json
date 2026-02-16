@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
-    "dist": "node esbuild.config.mjs production && mkdir -p dist/obsidian-annotated && cp main.js manifest.json styles.css dist/obsidian-annotated/"
+    "dist": "node esbuild.config.mjs production && mkdir -p dist/obsidian-annotated && cp main.js manifest.json styles.css dist/obsidian-annotated/",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -15,8 +17,10 @@
     "@types/node": "^16.11.6",
     "builtin-modules": "^3.3.0",
     "esbuild": "0.17.3",
+    "moment": "^2.30.1",
     "obsidian": "latest",
     "tslib": "2.4.0",
-    "typescript": "4.7.4"
+    "typescript": "4.7.4",
+    "vitest": "^4.0.18"
   }
 }
