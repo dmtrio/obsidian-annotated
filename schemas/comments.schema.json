@@ -1,0 +1,223 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/obsidian-annotated/schemas/comments.schema.json",
+  "title": "Annotated Comment File",
+  "description": "Schema for .comments.json files created by the Obsidian Annotated plugin. Each Markdown note (e.g. note.md) may have a sibling file (note.md.comments.json) that stores all comment threads anchored to lines in that note.",
+  "type": "object",
+  "required": ["version", "createdBy", "note_path", "created_at", "updated_at", "comments", "metadata"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version number. Incremented when the file format changes in a backwards-incompatible way. Current version: 1."
+    },
+    "createdBy": {
+      "type": "string",
+      "pattern": "^obsidian-annotated@",
+      "description": "Identifier of the plugin version that created this file, in the format 'obsidian-annotated@<semver>'. Used for debugging and future migration logic.",
+      "examples": ["obsidian-annotated@0.1.0"]
+    },
+    "note_path": {
+      "type": "string",
+      "description": "Vault-relative path of the Markdown note this file annotates. Updated automatically when the note is renamed.",
+      "examples": ["folder/my-note.md"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when this comment file was first created."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last write to this file. Updated on every save."
+    },
+    "comments": {
+      "type": "array",
+      "description": "Top-level comments anchored to locations in the note. Each comment is the root of a thread — replies are nested inside.",
+      "items": { "$ref": "#/$defs/Comment" }
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata",
+      "description": "Aggregate statistics recalculated on every save. Consumers can read these without iterating the comments array."
+    }
+  },
+
+  "$defs": {
+    "Comment": {
+      "type": "object",
+      "description": "A top-level comment anchored to a line range in the note. Contains an inline replies array that forms the thread.",
+      "required": ["id", "author", "created_at", "updated_at", "location", "content", "status", "replies", "last_activity_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^c_",
+          "description": "Unique identifier. Generated as 'c_' + base-36 timestamp + 5-char UUID fragment.",
+          "examples": ["c_m1abc2def3"]
+        },
+        "author": {
+          "type": "string",
+          "description": "Display name of the person who created this comment."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when the comment was created."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of the last modification to this comment (reply added, resolved, etc.)."
+        },
+        "location": {
+          "$ref": "#/$defs/RangeLocation",
+          "description": "The line range in the note that this comment is anchored to. Updated automatically when lines shift due to edits."
+        },
+        "content": {
+          "type": "string",
+          "description": "The comment body text."
+        },
+        "status": {
+          "$ref": "#/$defs/CommentStatus",
+          "description": "Whether this comment thread is open or resolved."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when the comment was resolved. Present only when status is 'resolved'."
+        },
+        "resolved_by": {
+          "type": "string",
+          "description": "Author who resolved this comment. Present only when status is 'resolved'."
+        },
+        "replies": {
+          "type": "array",
+          "description": "Ordered list of replies forming the thread under this comment. Newest reply is last.",
+          "items": { "$ref": "#/$defs/Reply" }
+        },
+        "last_activity_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of the most recent activity: the latest reply's created_at, or the comment's own created_at if no replies exist. Used for sorting by recency."
+        },
+        "content_snippet": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "First 50 characters (trimmed) of the note line at the comment's start_line. Used to relocate the comment when lines shift due to edits above it."
+        },
+        "is_stale": {
+          "type": "boolean",
+          "description": "Set to true when the plugin cannot relocate this comment's snippet in the document. The anchored line may no longer be accurate."
+        }
+      }
+    },
+
+    "Reply": {
+      "type": "object",
+      "description": "A reply within a comment thread. Replies do not have their own location — they inherit the parent comment's anchor.",
+      "required": ["id", "author", "created_at", "updated_at", "content", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^c_",
+          "description": "Unique identifier, same format as comment IDs."
+        },
+        "author": {
+          "type": "string",
+          "description": "Display name of the reply author."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when the reply was created."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of the last modification to this reply."
+        },
+        "content": {
+          "type": "string",
+          "description": "The reply body text."
+        },
+        "status": {
+          "$ref": "#/$defs/CommentStatus",
+          "description": "Status of the reply. Currently always 'open'."
+        }
+      }
+    },
+
+    "RangeLocation": {
+      "type": "object",
+      "description": "A line range in the note. Lines are 1-indexed, character offsets are 0-indexed. For a comment on a single line, start_line equals end_line.",
+      "required": ["type", "start_line", "start_char", "end_line", "end_char"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "range",
+          "description": "Location type discriminator. Currently only 'range' is supported."
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "First line of the annotated range (1-indexed)."
+        },
+        "start_char": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Character offset within start_line (0-indexed). 0 if no sub-line selection."
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Last line of the annotated range (1-indexed). Equals start_line for single-line comments."
+        },
+        "end_char": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Character offset within end_line (0-indexed). 0 if no sub-line selection."
+        }
+      }
+    },
+
+    "CommentStatus": {
+      "type": "string",
+      "enum": ["open", "resolved"],
+      "description": "'open' — active and visible by default. 'resolved' — closed, hidden by default in the gutter and sidebar."
+    },
+
+    "Metadata": {
+      "type": "object",
+      "description": "Aggregate statistics for the comment file. Recalculated automatically on every save — never edit these by hand.",
+      "required": ["total_comments", "open_count", "resolved_count", "authors"],
+      "additionalProperties": false,
+      "properties": {
+        "total_comments": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of top-level comments (does not count replies)."
+        },
+        "open_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of comments with status 'open'."
+        },
+        "resolved_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of comments with status 'resolved'."
+        },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Deduplicated list of all author names across comments and replies."
+        }
+      }
+    }
+  }
+}
