@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { CommentManager } from "../../src/managers/CommentManager";
 import { createMockVault } from "../mocks/vault";
-import { Comment, CommentFile, CommentReply } from "../../src/types";
+import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "../../src/types";
 
 function makeComment(overrides: Partial<Comment> = {}): Comment {
   const now = new Date().toISOString();
@@ -25,7 +25,7 @@ describe("CommentManager", () => {
 
   beforeEach(() => {
     vault = createMockVault();
-    manager = new CommentManager(vault);
+    manager = new CommentManager(vault, "0.1.0");
   });
 
   describe("addComment", () => {
@@ -33,11 +33,13 @@ describe("CommentManager", () => {
       const comment = makeComment();
       await manager.addComment("note.md", comment);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.comments).toHaveLength(1);
       expect(file.comments[0].id).toBe(comment.id);
       expect(file.note_path).toBe("note.md");
+      expect(file.version).toBe(SCHEMA_VERSION);
+      expect(file.createdBy).toBe("obsidian-annotated@0.1.0");
     });
 
     it("appends to existing comment file", async () => {
@@ -46,7 +48,7 @@ describe("CommentManager", () => {
       await manager.addComment("note.md", c1);
       await manager.addComment("note.md", c2);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.comments).toHaveLength(2);
     });
@@ -67,7 +69,7 @@ describe("CommentManager", () => {
       };
       await manager.addReply("note.md", "c_1", reply);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.comments[0].replies).toHaveLength(1);
       expect(file.comments[0].last_activity_at).toBe("2024-06-01T00:00:00Z");
@@ -92,7 +94,7 @@ describe("CommentManager", () => {
       };
       await manager.addReply("note.md", "c_1", reply);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.comments[0].status).toBe("open");
       expect(file.comments[0].resolved_at).toBeUndefined();
@@ -106,7 +108,7 @@ describe("CommentManager", () => {
       await manager.addComment("note.md", comment);
       await manager.resolveComment("note.md", "c_1", "alice");
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.comments[0].status).toBe("resolved");
       expect(file.comments[0].resolved_by).toBe("alice");
@@ -137,10 +139,10 @@ describe("CommentManager", () => {
       manager.invalidateCache("note.md");
 
       // Modify underlying file directly
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       file.comments[0].content = "modified";
-      await vault.adapter.write("note.md.comments", JSON.stringify(file));
+      await vault.adapter.write("note.md.comments.json", JSON.stringify(file));
 
       const refreshed = await manager.getComments("note.md");
       expect(refreshed?.comments[0].content).toBe("modified");
@@ -154,7 +156,7 @@ describe("CommentManager", () => {
       await manager.addComment("note.md", c1);
       await manager.addComment("note.md", c2);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.metadata.total_comments).toBe(2);
       expect(file.metadata.open_count).toBe(1);
@@ -177,7 +179,7 @@ describe("CommentManager", () => {
       };
       await manager.addReply("note.md", "c_1", reply);
 
-      const raw = await vault.adapter.read("note.md.comments");
+      const raw = await vault.adapter.read("note.md.comments.json");
       const file = JSON.parse(raw) as CommentFile;
       expect(file.metadata.authors).toContain("charlie");
     });

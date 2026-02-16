@@ -1,12 +1,14 @@
 import { Notice, Vault } from "obsidian";
-import { Comment, CommentFile, CommentReply } from "../types";
+import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "../types";
 
 export class CommentManager {
 	private vault: Vault;
+	private pluginVersion: string;
 	private cache: Map<string, CommentFile> = new Map();
 
-	constructor(vault: Vault) {
+	constructor(vault: Vault, pluginVersion = "0.0.0") {
 		this.vault = vault;
+		this.pluginVersion = pluginVersion;
 	}
 
 	async getComments(notePath: string): Promise<CommentFile | null> {
@@ -86,7 +88,7 @@ export class CommentManager {
 	}
 
 	private commentsPath(notePath: string): string {
-		return notePath + ".comments";
+		return notePath + ".comments.json";
 	}
 
 	private recalculateMetadata(commentFile: CommentFile): void {
@@ -115,7 +117,8 @@ export class CommentManager {
 	private createEmptyCommentFile(notePath: string): CommentFile {
 		const now = new Date().toISOString();
 		return {
-			version: "1.0",
+			version: SCHEMA_VERSION,
+			createdBy: `obsidian-annotated@${this.pluginVersion}`,
 			note_path: notePath,
 			created_at: now,
 			updated_at: now,

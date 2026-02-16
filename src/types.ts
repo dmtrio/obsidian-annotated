@@ -50,8 +50,11 @@ export interface CommentFileMetadata {
 	authors: string[];
 }
 
+export const SCHEMA_VERSION = 1;
+
 export interface CommentFile {
-	version: string;
+	version: number;
+	createdBy: string;
 	note_path: string;
 	created_at: string;   // ISO 8601
 	updated_at: string;   // ISO 8601

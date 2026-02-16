@@ -50,7 +50,7 @@ export default class AnnotatedPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    this.commentManager = new CommentManager(this.app.vault);
+    this.commentManager = new CommentManager(this.app.vault, this.manifest.version);
     this.addSettingTab(new AnnotatedSettingTab(this.app, this));
 
     // Create popup before gutter extension
@@ -119,9 +119,9 @@ export default class AnnotatedPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file.path.endsWith(".comments")) {
+        if (file.path.endsWith(".comments.json")) {
           if (this._selfSaveCount > 0) return;
-          const notePath = file.path.slice(0, -".comments".length);
+          const notePath = file.path.slice(0, -".comments.json".length);
           this.commentManager.invalidateCache(notePath);
           this.refreshGutterForFile(notePath);
           this.refreshSidebar();
@@ -131,8 +131,8 @@ export default class AnnotatedPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.path.endsWith(".comments")) {
-          const notePath = file.path.slice(0, -".comments".length);
+        if (file.path.endsWith(".comments.json")) {
+          const notePath = file.path.slice(0, -".comments.json".length);
           this.commentManager.invalidateCache(notePath);
           this.refreshGutterForFile(notePath);
         }
@@ -144,16 +144,16 @@ export default class AnnotatedPlugin extends Plugin {
         "rename",
         async (file: TAbstractFile, oldPath: string) => {
           // If the .comments file itself was renamed directly, just invalidate
-          if (oldPath.endsWith(".comments")) {
-            const oldNotePath = oldPath.slice(0, -".comments".length);
+          if (oldPath.endsWith(".comments.json")) {
+            const oldNotePath = oldPath.slice(0, -".comments.json".length);
             this.commentManager.invalidateCache(oldNotePath);
             return;
           }
 
           if (!(file instanceof TFile) || !file.path.endsWith(".md")) return;
 
-          const oldCommentsPath = oldPath + ".comments";
-          const newCommentsPath = file.path + ".comments";
+          const oldCommentsPath = oldPath + ".comments.json";
+          const newCommentsPath = file.path + ".comments.json";
 
           if (!(await this.app.vault.adapter.exists(oldCommentsPath))) return;
 
