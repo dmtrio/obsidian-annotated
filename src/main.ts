@@ -4,6 +4,7 @@ import {
   MarkdownView,
   Menu,
   Notice,
+  Platform,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -47,6 +48,7 @@ export default class AnnotatedPlugin extends Plugin {
   commentManager: CommentManager;
   private commentPopup: CommentPopup;
   private _selfSaveCount = 0;
+  private spikeMcpServer: { stop(): Promise<void> } | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -228,10 +230,47 @@ export default class AnnotatedPlugin extends Plugin {
       });
     });
 
+    if (Platform.isDesktop) {
+      this.startSpikeMcpServer();
+    }
+
     console.log("Annotated plugin loaded");
   }
 
+  // Step-1 spike (PLN — Event-Driven Comment Watch). Dynamic import keeps the
+  // MCP SDK and node builtins out of the mobile load path. Outcome is also
+  // appended to spike.log in the plugin dir so it can be read without devtools.
+  private async startSpikeMcpServer(): Promise<void> {
+    const log = (msg: string) =>
+      this.app.vault.adapter
+        .append(
+          `${this.manifest.dir}/spike.log`,
+          `${new Date().toISOString()} [v${this.manifest.version}] ${msg}\n`,
+        )
+        .catch(() => {});
+    try {
+      const { SpikeMcpServer } = await import("./mcp/SpikeMcpServer");
+      const server = new SpikeMcpServer({
+        vaultName: this.app.vault.getName(),
+        pluginVersion: this.manifest.version,
+      });
+      await server.start();
+      this.spikeMcpServer = server;
+      console.log(`Annotated: spike MCP server listening at ${server.address}/mcp`);
+      await log(`listening at ${server.address}/mcp`);
+    } catch (err) {
+      console.error("Annotated: spike MCP server failed to start", err);
+      await log(
+        `failed to start: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      );
+    }
+  }
+
   onunload() {
+    this.spikeMcpServer?.stop().catch((err) => {
+      console.error("Annotated: spike MCP server failed to stop", err);
+    });
+    this.spikeMcpServer = null;
     this.commentPopup.destroy();
     this.commentManager.clearCache();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);

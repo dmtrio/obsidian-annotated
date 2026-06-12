@@ -11,6 +11,19 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
+// The MCP SDK imports builtins via the "node:" prefix; mark them external and
+// strip the prefix so the bundle emits require("crypto") etc., which Obsidian's
+// runtime require resolves on desktop.
+const nodePrefixExternal = {
+	name: "node-prefix-external",
+	setup(build) {
+		build.onResolve({ filter: /^node:/ }, (args) => ({
+			path: args.path.slice("node:".length),
+			external: true,
+		}));
+	},
+};
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -32,6 +45,7 @@ const context = await esbuild.context({
 		"@lezer/highlight",
 		"@lezer/lr",
 		...builtins],
+	plugins: [nodePrefixExternal],
 	format: "cjs",
 	target: "es2018",
 	logLevel: "info",

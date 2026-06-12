@@ -1,6 +1,6 @@
 {
   "name": "obsidian-annotated",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Code review-style comments for Obsidian notes",
   "main": "main.js",
   "scripts": {
@@ -22,5 +22,9 @@
     "tslib": "2.4.0",
     "typescript": "4.7.4",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
   }
 }
