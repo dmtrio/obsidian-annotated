@@ -608,7 +608,7 @@
 /* Section descriptions sit flush-left by default; indent to match the
    theme's heading offset. */
 .annotated-section-desc {
-  margin-left: 2em;
+  margin-left: 1.3em;
 }
 
 /* Tall control (checkbox grid) — align the name/desc block to the top. */
@@ -624,6 +624,11 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 16px;
   max-width: 380px;
+  /* ~6 rows visible; vaults with many root folders scroll instead of
+     stretching the card */
+  max-height: 160px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .annotated-fence-options label {
   display: inline-flex;
