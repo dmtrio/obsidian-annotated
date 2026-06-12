@@ -592,6 +592,7 @@
   border-radius: var(--radius-m, 8px);
   padding: 2px 12px;
   margin-top: 8px;
+  margin-bottom: 14px;
 }
 .annotated-mint-group .setting-item {
   background: transparent;
@@ -604,6 +605,20 @@
 .annotated-mint-group .setting-item + .setting-item {
   border-top: 1px solid var(--background-modifier-border);
 }
+/* Section descriptions sit flush-left by default; indent to match the
+   theme's heading offset. */
+.annotated-section-desc {
+  margin-left: 2em;
+}
+
+/* Tall control (checkbox grid) — align the name/desc block to the top. */
+.annotated-fence-row {
+  align-items: flex-start;
+}
+.annotated-fence-row .setting-item-info {
+  padding-top: 2px;
+}
+
 .annotated-fence-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

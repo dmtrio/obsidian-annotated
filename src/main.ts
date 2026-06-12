@@ -1102,13 +1102,13 @@ class AnnotatedSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: strings.settings.sections.identities });
     containerEl.createEl("p", {
       text: strings.settings.identities.desc,
-      cls: "setting-item-description",
+      cls: ["setting-item-description", "annotated-section-desc"],
     });
 
     if (this.plugin.settings.identities.length === 0) {
       containerEl.createEl("p", {
         text: strings.settings.identities.empty,
-        cls: "setting-item-description",
+        cls: ["setting-item-description", "annotated-section-desc"],
       });
     }
 
@@ -1204,7 +1204,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
     containerEl.createEl("h4", { text: strings.settings.mcp.keysHeading });
     containerEl.createEl("p", {
       text: strings.settings.mcp.keysDesc,
-      cls: "setting-item-description",
+      cls: ["setting-item-description", "annotated-section-desc"],
     });
 
     let mintIdentityId = this.plugin.settings.identities[0]?.id ?? "";
@@ -1236,6 +1236,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
     const fenceSetting = new Setting(mintGroup)
       .setName(strings.settings.mcp.fenceName)
       .setDesc(strings.settings.mcp.fenceDesc);
+    fenceSetting.settingEl.addClass("annotated-fence-row");
     const fenceOptions = fenceSetting.controlEl.createDiv({ cls: "annotated-fence-options" });
     for (const folder of rootFolders) {
       const label = fenceOptions.createEl("label");
@@ -1271,7 +1272,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
     if (device.keys.length === 0) {
       containerEl.createEl("p", {
         text: strings.settings.mcp.noKeys,
-        cls: "setting-item-description",
+        cls: ["setting-item-description", "annotated-section-desc"],
       });
     }
 
@@ -1342,7 +1343,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
     if (envCount > 0) {
       containerEl.createEl("p", {
         text: strings.settings.mcp.envKeys(envCount),
-        cls: "setting-item-description",
+        cls: ["setting-item-description", "annotated-section-desc"],
       });
     }
   }
