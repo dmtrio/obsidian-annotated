@@ -22,8 +22,11 @@ export interface ActionableRef {
 }
 
 export interface ActionableQueryParams {
-	/** Folder or exact note path, vault-relative. Empty/undefined = whole vault. */
-	scope?: string;
+	/**
+	 * Folder or exact note path (or several), vault-relative.
+	 * Empty/undefined = whole vault.
+	 */
+	scope?: string | string[];
 	/** Authors whose last-word threads are NOT actionable (see effectiveExcludeAuthors). */
 	excludeAuthors: string[];
 	/**
@@ -48,8 +51,11 @@ export function toActionableRef(comment: Comment, notePath: string): ActionableR
 		id: lastMessage.id,
 		note_path: notePath,
 		thread_id: comment.id,
-		last_activity_at: comment.last_activity_at,
-		snippet: lastMessage.content.trim().slice(0, SNIPPET_MAX),
+		// Legacy sidecars (pre-plugin or older writers) can lack
+		// last_activity_at — fall back rather than crash the whole query.
+		last_activity_at:
+			comment.last_activity_at ?? lastMessage.created_at ?? comment.created_at ?? "",
+		snippet: (lastMessage.content ?? "").trim().slice(0, SNIPPET_MAX),
 	};
 }
 
@@ -64,8 +70,15 @@ export function queryActionable(
 ): ActionableRef[] {
 	const refs: ActionableRef[] = [];
 
+	const scopes =
+		params.scope === undefined || typeof params.scope === "string"
+			? [params.scope]
+			: params.scope.length > 0
+				? params.scope
+				: [undefined];
+
 	for (const { notePath, file } of files) {
-		if (!pathInScope(notePath, params.scope)) continue;
+		if (!scopes.some((scope) => pathInScope(notePath, scope))) continue;
 
 		for (const comment of file.comments) {
 			const include =
@@ -80,7 +93,7 @@ export function queryActionable(
 
 	refs.sort(
 		(a, b) =>
-			a.last_activity_at.localeCompare(b.last_activity_at) ||
+			(a.last_activity_at || "").localeCompare(b.last_activity_at || "") ||
 			a.note_path.localeCompare(b.note_path),
 	);
 	return refs;

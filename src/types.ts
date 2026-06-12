@@ -15,12 +15,18 @@ export {
 
 // ── Plugin Settings ────────────────────────────────────────────
 
+import type { Identity } from "@annotated/comments-core";
+
 export interface PluginSettings {
 	// Display
 	showGutterIndicators: boolean;
 
 	// Author
 	defaultAuthor: string;
+
+	// Identity registry (PLN Decision 4b): lives in data.json so it SYNCS
+	// between instances. Keys/bind-config are device-local — never here.
+	identities: Identity[];
 
 	// Filtering
 	hideResolvedByDefault: boolean;
@@ -37,6 +43,7 @@ export interface PluginSettings {
 export const DEFAULT_SETTINGS: PluginSettings = {
 	showGutterIndicators: true,
 	defaultAuthor: "claude",
+	identities: [],
 	hideResolvedByDefault: true,
 	commentIndicatorStyle: "icon",
 	customGutterEmoji: "\u{1F4AC}",

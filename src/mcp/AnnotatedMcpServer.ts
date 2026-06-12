@@ -1,0 +1,486 @@
+/**
+ * Step-4 server (PLN — Event-Driven Comment Watch): MCP over Streamable HTTP
+ * plus GET /comments/actionable, hosted inside the plugin.
+ *
+ * No "obsidian" imports — vault access, identities, and keys are injected, so
+ * the whole server is testable in plain node (tests/mcp/). The plugin binding
+ * lives in PluginMcpHost.ts.
+ *
+ * Auth (PLN Decisions 4/4b): every surface requires a bearer key; the key's
+ * identity stamps author/author_id on writes and defaults excludeAuthors on
+ * watch queries. Full scope → all MCP tools; watch scope → actionable GET only.
+ */
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
+// Static imports on purpose — see LOG 2026-06-12: dynamic import("http") does
+// not survive Obsidian's renderer; require("http") does.
+import { createServer } from "http";
+import type { IncomingMessage, Server, ServerResponse } from "http";
+import {
+	authenticate,
+	authHttpStatus,
+	bearerToken,
+	effectiveExcludeAuthors,
+	keyAllowsPath,
+	pathInScope,
+	queryActionable,
+	resolveQueryScope,
+} from "@annotated/comments-core";
+import type {
+	Comment,
+	CommentFile,
+	CommentReply,
+	CommentStatus,
+	CommentStore,
+	Identity,
+	KeyRecord,
+} from "@annotated/comments-core";
+
+export interface NoteAccess {
+	exists(path: string): Promise<boolean>;
+	read(path: string): Promise<string>;
+	write(path: string, content: string): Promise<void>;
+	/** Vault-relative paths of notes that have a comment sidecar. */
+	listCommentedNotePaths(): Promise<string[]>;
+}
+
+export interface AuthProvider {
+	getIdentities(): Identity[];
+	getKeys(): KeyRecord[];
+}
+
+export interface AnnotatedMcpServerDeps {
+	store: CommentStore;
+	notes: NoteAccess;
+	auth: AuthProvider;
+	info: { vaultName: string; pluginVersion: string };
+	/** Optional sink for lifecycle/diagnostic lines (the plugin writes a log file). */
+	onLog?: (message: string) => void;
+}
+
+export interface AnnotatedMcpServerConfig {
+	port: number;
+	host: string;
+}
+
+const SNIPPET_MAX = 50;
+
+export class AnnotatedMcpServer {
+	private httpServer: Server | null = null;
+
+	constructor(
+		private readonly deps: AnnotatedMcpServerDeps,
+		private readonly config: AnnotatedMcpServerConfig,
+	) {}
+
+	get address(): string {
+		return `http://${this.config.host}:${this.config.port}`;
+	}
+
+	async start(): Promise<void> {
+		const server = createServer((req, res) => {
+			this.route(req, res).catch((err) => {
+				this.deps.onLog?.(`request failed: ${err instanceof Error ? err.message : String(err)}`);
+				if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
+				if (!res.writableEnded) res.end(JSON.stringify({ error: "internal error" }));
+			});
+		});
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(this.config.port, this.config.host, () => {
+				server.removeListener("error", reject);
+				resolve();
+			});
+		});
+		this.httpServer = server;
+	}
+
+	async stop(): Promise<void> {
+		const server = this.httpServer;
+		if (!server) return;
+		this.httpServer = null;
+		await new Promise<void>((resolve) => {
+			server.close(() => resolve());
+			server.closeAllConnections?.();
+		});
+	}
+
+	// ── Routing ─────────────────────────────────────────────────
+
+	private async route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+		// Unauthenticated liveness probe — no vault data, no secrets.
+		if (url.pathname === "/health") {
+			return this.json(res, 200, { ok: true, pluginVersion: this.deps.info.pluginVersion });
+		}
+
+		const auth = await authenticate(
+			bearerToken(req.headers.authorization),
+			this.deps.auth.getKeys(),
+			this.deps.auth.getIdentities(),
+		);
+
+		if (url.pathname === "/comments/actionable" && req.method === "GET") {
+			const status = authHttpStatus(auth, "actionable");
+			if (status !== 200 || !auth.ok) return this.deny(res, status);
+			return this.handleActionable(url, auth.identity, auth.key, res);
+		}
+
+		if (url.pathname === "/mcp") {
+			const status = authHttpStatus(auth, "mcp");
+			if (status !== 200 || !auth.ok) return this.deny(res, status);
+			return this.handleMcp(req, res, auth.identity, auth.key);
+		}
+
+		return this.json(res, 404, { error: "not found" });
+	}
+
+	private deny(res: ServerResponse, status: 401 | 403): void {
+		this.json(res, status, { error: status === 401 ? "unauthorized" : "forbidden" });
+	}
+
+	private json(res: ServerResponse, status: number, body: unknown): void {
+		res.writeHead(status, { "content-type": "application/json" });
+		res.end(JSON.stringify(body));
+	}
+
+	// ── Watch surface ───────────────────────────────────────────
+
+	private async handleActionable(
+		url: URL,
+		identity: Identity,
+		key: KeyRecord,
+		res: ServerResponse,
+	): Promise<void> {
+		const scope = resolveQueryScope(url.searchParams.get("scope") ?? undefined, key);
+		if (!scope.ok) {
+			return this.json(res, 403, { error: "scope outside this key's folder fence" });
+		}
+		const requested = url.searchParams.getAll("excludeAuthor");
+		const statusParam = url.searchParams.get("status");
+		const refs = await this.runActionableQuery({
+			scope: scope.scopes,
+			excludeAuthors: effectiveExcludeAuthors(requested, identity),
+			status: statusParam === "resolved" || statusParam === "open" ? statusParam : undefined,
+		});
+		this.json(res, 200, refs);
+	}
+
+	private async runActionableQuery(params: {
+		scope?: string | string[];
+		excludeAuthors: string[];
+		status?: CommentStatus;
+	}) {
+		const files = await this.loadCommentFiles();
+		return queryActionable(files, params);
+	}
+
+	private async loadCommentFiles(): Promise<{ notePath: string; file: CommentFile }[]> {
+		const paths = await this.deps.notes.listCommentedNotePaths();
+		const files: { notePath: string; file: CommentFile }[] = [];
+		for (const notePath of paths) {
+			const file = await this.deps.store.getComments(notePath);
+			if (file) files.push({ notePath, file });
+		}
+		return files;
+	}
+
+	// ── MCP surface ─────────────────────────────────────────────
+
+	private async handleMcp(
+		req: IncomingMessage,
+		res: ServerResponse,
+		identity: Identity,
+		key: KeyRecord,
+	): Promise<void> {
+		// Stateless: fresh server+transport per request, bound to the
+		// authenticated identity. No session bookkeeping to leak.
+		const mcp = this.buildMcpServer(identity, key);
+		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+		res.on("close", () => {
+			transport.close();
+			mcp.close();
+		});
+		await mcp.connect(transport);
+		await transport.handleRequest(req, res);
+	}
+
+	private buildMcpServer(identity: Identity, key: KeyRecord): McpServer {
+		const mcp = new McpServer({
+			name: "obsidian-annotated",
+			version: this.deps.info.pluginVersion,
+		});
+		const { store, notes } = this.deps;
+		const text = (value: unknown) => ({
+			content: [{ type: "text" as const, text: JSON.stringify(value) }],
+		});
+		const assertPath = (path: string) => {
+			if (!keyAllowsPath(key, path)) {
+				throw new Error(`Path is outside this key's folder fence: ${path}`);
+			}
+		};
+
+		mcp.registerTool(
+			"check_comments",
+			{
+				title: "Check for actionable comments",
+				description:
+					"Non-blocking scan for comment threads that need attention (open, last message not from an excluded author). Returns id-level refs {id, note_path, thread_id, last_activity_at, snippet}; use read_comments for full bodies. excludeAuthors defaults to your own identity.",
+				inputSchema: {
+					path: z.string().optional().describe("Folder or note path scope (default: whole vault)"),
+					excludeAuthors: z.array(z.string()).optional(),
+					status: z.enum(["open", "resolved"]).optional(),
+				},
+			},
+			async ({ path, excludeAuthors, status }) => {
+				const scope = resolveQueryScope(path, key);
+				if (!scope.ok) throw new Error(`Scope is outside this key's folder fence: ${path}`);
+				return text(
+					await this.runActionableQuery({
+						scope: scope.scopes,
+						excludeAuthors: effectiveExcludeAuthors(excludeAuthors, identity),
+						status,
+					}),
+				);
+			},
+		);
+
+		mcp.registerTool(
+			"read_comments",
+			{
+				title: "Read comments on a note",
+				description:
+					"All comment threads on a note (replies nested), optionally filtered by status or author. Empty result if the note has no comments.",
+				inputSchema: {
+					path: z.string(),
+					status: z.enum(["open", "resolved"]).optional(),
+					author: z.string().optional(),
+				},
+			},
+			async ({ path, status, author }) => {
+				assertPath(path);
+				const file = await store.getComments(path);
+				if (!file) return text({ path, comments: [] });
+				let comments = file.comments;
+				if (status) comments = comments.filter((c) => c.status === status);
+				if (author) comments = comments.filter((c) => c.author === author);
+				return text({ path, comments });
+			},
+		);
+
+		mcp.registerTool(
+			"add_comment",
+			{
+				title: "Add a comment",
+				description:
+					"Add a new comment thread to a note. Author is your authenticated identity — it cannot be overridden.",
+				inputSchema: {
+					path: z.string(),
+					content: z.string().min(1),
+					startLine: z.number().int().min(1),
+					endLine: z.number().int().min(1),
+					startChar: z.number().int().min(0).optional(),
+					endChar: z.number().int().min(0).optional(),
+				},
+			},
+			async ({ path, content, startLine, endLine, startChar, endChar }) => {
+				assertPath(path);
+				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+				const now = new Date().toISOString();
+				const comment: Comment = {
+					id: store.generateId(),
+					author: identity.name,
+					author_id: identity.id,
+					created_at: now,
+					updated_at: now,
+					location: {
+						type: "range",
+						start_line: startLine,
+						start_char: startChar ?? 0,
+						end_line: endLine,
+						end_char: endChar ?? 0,
+					},
+					content,
+					status: "open",
+					replies: [],
+					last_activity_at: now,
+					content_snippet: await this.captureSnippet(path, startLine),
+				};
+				await store.addComment(path, comment);
+				return text({ ok: true, id: comment.id });
+			},
+		);
+
+		mcp.registerTool(
+			"reply_to_comment",
+			{
+				title: "Reply to a comment",
+				description:
+					"Reply to an existing thread (reopens it if resolved). Author is your authenticated identity.",
+				inputSchema: {
+					path: z.string(),
+					commentId: z.string(),
+					content: z.string().min(1),
+				},
+			},
+			async ({ path, commentId, content }) => {
+				assertPath(path);
+				await this.requireThread(path, commentId);
+				const now = new Date().toISOString();
+				const reply: CommentReply = {
+					id: store.generateId(),
+					author: identity.name,
+					author_id: identity.id,
+					created_at: now,
+					updated_at: now,
+					content,
+					status: "open",
+				};
+				await store.addReply(path, commentId, reply);
+				return text({ ok: true, id: reply.id });
+			},
+		);
+
+		mcp.registerTool(
+			"resolve_comment",
+			{
+				title: "Resolve or reopen a comment",
+				description:
+					"Mark a thread resolved (default) or reopen it. resolved_by is your authenticated identity. Idempotent.",
+				inputSchema: {
+					path: z.string(),
+					commentId: z.string(),
+					status: z.enum(["resolved", "open"]).optional(),
+				},
+			},
+			async ({ path, commentId, status }) => {
+				assertPath(path);
+				const { file, comment } = await this.requireThread(path, commentId);
+				if ((status ?? "resolved") === "resolved") {
+					comment.status = "resolved";
+					comment.resolved_at = new Date().toISOString();
+					comment.resolved_by = identity.name;
+					comment.resolved_by_id = identity.id;
+					comment.updated_at = comment.resolved_at;
+				} else {
+					comment.status = "open";
+					comment.resolved_at = undefined;
+					comment.resolved_by = undefined;
+					comment.resolved_by_id = undefined;
+					comment.updated_at = new Date().toISOString();
+				}
+				await store.saveComments(file);
+				return text({ ok: true, id: commentId, status: comment.status });
+			},
+		);
+
+		mcp.registerTool(
+			"list_commented_notes",
+			{
+				title: "List notes that have comments",
+				description:
+					"Which notes have comments, sorted by open count descending (most actionable first).",
+				inputSchema: {
+					path: z.string().optional().describe("Folder scope (default: whole vault)"),
+					status: z.enum(["open", "resolved"]).optional(),
+				},
+			},
+			async ({ path, status }) => {
+				const files = await this.loadCommentFiles();
+				const notes = files
+					.filter(
+						({ notePath }) =>
+							keyAllowsPath(key, notePath) && (!path || pathInScope(notePath, path)),
+					)
+					.map(({ notePath, file }) => ({
+						path: notePath,
+						open: file.metadata.open_count,
+						resolved: file.metadata.resolved_count,
+						lastActivity: file.updated_at,
+					}))
+					.filter((n) =>
+						status === "open" ? n.open > 0 : status === "resolved" ? n.resolved > 0 : true,
+					)
+					.sort((a, b) => b.open - a.open);
+				return text({ notes });
+			},
+		);
+
+		mcp.registerTool(
+			"read_note",
+			{
+				title: "Read a note",
+				description: "Raw markdown content of a note (frontmatter included).",
+				inputSchema: { path: z.string() },
+			},
+			async ({ path }) => {
+				assertPath(path);
+				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+				return text({ path, content: await notes.read(path) });
+			},
+		);
+
+		mcp.registerTool(
+			"patch_note",
+			{
+				title: "Patch a note",
+				description:
+					"Replace an exact string in a note. Fails if oldString matches multiple times unless replaceAll is true, and fails if it matches nothing.",
+				inputSchema: {
+					path: z.string(),
+					oldString: z.string().min(1),
+					newString: z.string(),
+					replaceAll: z.boolean().optional(),
+				},
+			},
+			async ({ path, oldString, newString, replaceAll }) => {
+				assertPath(path);
+				if (typeof newString !== "string") {
+					// zod already enforces this; belt-and-suspenders against the
+					// "undefined written into the note" bug class (LOG 2026-06-11).
+					throw new Error("newString is required");
+				}
+				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+				const content = await notes.read(path);
+				const occurrences = content.split(oldString).length - 1;
+				if (occurrences === 0) throw new Error("oldString not found in note");
+				if (occurrences > 1 && !replaceAll) {
+					throw new Error(
+						`oldString matches ${occurrences} times; pass replaceAll or a more specific string`,
+					);
+				}
+				const updated = replaceAll
+					? content.split(oldString).join(newString)
+					: content.replace(oldString, newString);
+				await notes.write(path, updated);
+				return text({ ok: true, replacements: occurrences });
+			},
+		);
+
+		return mcp;
+	}
+
+	// ── Helpers ─────────────────────────────────────────────────
+
+	private async requireThread(
+		path: string,
+		commentId: string,
+	): Promise<{ file: CommentFile; comment: Comment }> {
+		const file = await this.deps.store.getComments(path);
+		const comment = file?.comments.find((c) => c.id === commentId);
+		if (!file || !comment) throw new Error(`Comment not found: ${commentId} on ${path}`);
+		return { file, comment };
+	}
+
+	private async captureSnippet(path: string, startLine: number): Promise<string | undefined> {
+		try {
+			const lines = (await this.deps.notes.read(path)).split("\n");
+			const line = lines[startLine - 1];
+			return line === undefined ? undefined : line.trim().slice(0, SNIPPET_MAX);
+		} catch {
+			return undefined;
+		}
+	}
+}

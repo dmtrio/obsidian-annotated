@@ -7,6 +7,8 @@ import {
 	effectiveExcludeAuthors,
 	generateIdentityId,
 	hashToken,
+	keyAllowsPath,
+	resolveQueryScope,
 	timingSafeEqualHex,
 	AuthResult,
 	Identity,
@@ -131,6 +133,54 @@ describe("authorization matrix (the rejection matrix)", () => {
 			const result: AuthResult = await authenticate(token, keys, identities);
 			expect(authHttpStatus(result, surface), `${token} on ${surface}`).toBe(expected);
 		}
+	});
+});
+
+describe("folder fence (pathScope)", () => {
+	const fenced: KeyRecord = {
+		tokenHash: "h",
+		identityId: "i_claude",
+		scope: "full",
+		pathScope: ["Projects", "inbox/agent.md"],
+	};
+	const unfenced: KeyRecord = { tokenHash: "h", identityId: "i_claude", scope: "full" };
+
+	it("keyAllowsPath: unfenced key sees everything", () => {
+		expect(keyAllowsPath(unfenced, "anywhere/note.md")).toBe(true);
+	});
+
+	it("keyAllowsPath: fenced key sees inside the fence only", () => {
+		expect(keyAllowsPath(fenced, "Projects/x.md")).toBe(true);
+		expect(keyAllowsPath(fenced, "Projects/sub/y.md")).toBe(true);
+		expect(keyAllowsPath(fenced, "inbox/agent.md")).toBe(true);
+		expect(keyAllowsPath(fenced, "inbox/other.md")).toBe(false);
+		expect(keyAllowsPath(fenced, "ProjectsArchive/z.md")).toBe(false);
+	});
+
+	it("resolveQueryScope: unfenced key passes the request through", () => {
+		expect(resolveQueryScope("inbox", unfenced)).toEqual({ ok: true, scopes: ["inbox"] });
+		expect(resolveQueryScope(undefined, unfenced)).toEqual({ ok: true, scopes: undefined });
+	});
+
+	it("resolveQueryScope: fenced key with no request clamps to the fence", () => {
+		expect(resolveQueryScope(undefined, fenced)).toEqual({
+			ok: true,
+			scopes: ["Projects", "inbox/agent.md"],
+		});
+		expect(resolveQueryScope("", fenced)).toEqual({
+			ok: true,
+			scopes: ["Projects", "inbox/agent.md"],
+		});
+	});
+
+	it("resolveQueryScope: request inside the fence passes; outside is refused", () => {
+		expect(resolveQueryScope("Projects/sub", fenced)).toEqual({
+			ok: true,
+			scopes: ["Projects/sub"],
+		});
+		expect(resolveQueryScope("other", fenced)).toEqual({ ok: false });
+		// A parent of the fence is refused too (no implicit widening)
+		expect(resolveQueryScope("inbox", fenced)).toEqual({ ok: false });
 	});
 });
 

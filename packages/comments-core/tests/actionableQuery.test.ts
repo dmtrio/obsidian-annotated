@@ -111,6 +111,16 @@ describe("queryActionable", () => {
 		expect(refs.map((r) => r.thread_id)).toEqual(["c_a3"]);
 	});
 
+	it("tolerates legacy comments missing last_activity_at (real-vault regression)", () => {
+		const legacy = makeComment({ id: "c_legacy", author: "human" });
+		delete (legacy as Partial<Comment>).last_activity_at;
+		const refs = queryActionable([makeFile("old/note.md", [legacy])], {
+			excludeAuthors: ["Claude"],
+		});
+		expect(refs).toHaveLength(1);
+		expect(refs[0].last_activity_at).toBe(legacy.created_at);
+	});
+
 	it("status: 'open' behaves like the default actionable semantics", () => {
 		const defaults = queryActionable(files, { excludeAuthors: ["Claude"] });
 		const open = queryActionable(files, { excludeAuthors: ["Claude"], status: "open" });

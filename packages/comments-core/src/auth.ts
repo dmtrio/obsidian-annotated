@@ -5,6 +5,8 @@
 // where identities/keys are stored (data.json vs device-local vs env) is the
 // host's concern.
 
+import { pathInScope } from "./actionableQuery";
+
 export type KeyScope = "full" | "watch";
 
 export interface Identity {
@@ -21,6 +23,14 @@ export interface KeyRecord {
 	scope: KeyScope;
 	/** Optional human label for the settings UI ("agent watch key"). */
 	label?: string;
+	/** Keys minted together (full + watch) share a pairId; revoked together in the UI. */
+	pairId?: string;
+	/**
+	 * Optional folder fence: vault-relative folder (or note) prefixes this key
+	 * may see and touch. Empty/absent = whole vault. Orthogonal to `scope`
+	 * (which gates tools, not paths).
+	 */
+	pathScope?: string[];
 }
 
 /** The two server surfaces a key can be authorized for. */
@@ -104,6 +114,39 @@ export function authHttpStatus(result: AuthResult, surface: Surface): 200 | 401 
 	if (!result.ok) return 401;
 	if (!canAccess(result.key.scope, surface)) return 403;
 	return 200;
+}
+
+/** May this key touch this note? (Folder fence; tool gating is canAccess.) */
+export function keyAllowsPath(key: KeyRecord, notePath: string): boolean {
+	if (!key.pathScope || key.pathScope.length === 0) return true;
+	return key.pathScope.some((scope) => pathInScope(notePath, scope));
+}
+
+export type ScopeResolution =
+	| { ok: true; scopes: string[] | undefined } // undefined = whole vault
+	| { ok: false };
+
+/**
+ * Intersect a requested query scope with the key's folder fence.
+ * - Unfenced key: the request passes through.
+ * - Fenced key, no request: clamp to the fence.
+ * - Fenced key, request inside the fence: the request.
+ * - Fenced key, request outside: refusal — loud beats silently empty.
+ */
+export function resolveQueryScope(
+	requested: string | undefined,
+	key: KeyRecord,
+): ScopeResolution {
+	const fence = key.pathScope?.filter((s) => s.replace(/^\/+|\/+$/g, "") !== "");
+	if (!fence || fence.length === 0) {
+		return { ok: true, scopes: requested ? [requested] : undefined };
+	}
+	if (!requested || requested.replace(/^\/+|\/+$/g, "") === "") {
+		return { ok: true, scopes: fence };
+	}
+	const normalized = requested.replace(/^\/+|\/+$/g, "");
+	const within = fence.some((scope) => pathInScope(normalized, scope));
+	return within ? { ok: true, scopes: [normalized] } : { ok: false };
 }
 
 /**

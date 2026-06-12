@@ -11,7 +11,12 @@ import {
  * live in the core package.
  */
 export class CommentManager {
-	private store: CommentStore;
+	/**
+	 * Exposed so the in-plugin MCP server shares this exact instance — one
+	 * cache over one vault adapter; the modify-event invalidation in main.ts
+	 * reaches server-written files too.
+	 */
+	readonly store: CommentStore;
 
 	constructor(vault: Vault, pluginVersion = "0.0.0") {
 		const storage: CommentStorageAdapter = {

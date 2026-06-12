@@ -585,3 +585,43 @@
   padding-top: 8px;
   border-top: 1px solid var(--background-modifier-border);
 }
+
+/* ── MCP key mint form (settings) — one card, not three ───────── */
+.annotated-mint-group {
+  background: var(--background-secondary);
+  border-radius: var(--radius-m, 8px);
+  padding: 2px 12px;
+  margin-top: 8px;
+}
+.annotated-mint-group .setting-item {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 8px 0;
+}
+.annotated-mint-group .setting-item + .setting-item {
+  border-top: 1px solid var(--background-modifier-border);
+}
+.annotated-fence-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  max-width: 380px;
+  justify-content: flex-end;
+}
+.annotated-fence-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.annotated-token-block .annotated-token-input {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  width: 320px;
+  margin-right: 8px;
+}

@@ -10,6 +10,7 @@ import {
   Setting,
   TAbstractFile,
   TFile,
+  TFolder,
 } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
@@ -42,13 +43,22 @@ import {
   setCommentTrackerPositions,
   trackerCallbacks,
 } from "./editor/CommentPositionTracker";
+import { generateIdentityId } from "@annotated/comments-core";
+import {
+  buildAuthProvider,
+  buildNoteAccess,
+  DeviceLocalStore,
+  loadEnvKeys,
+  resolveBindConfig,
+} from "./mcp/PluginMcpHost";
 
 export default class AnnotatedPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
   commentManager: CommentManager;
   private commentPopup: CommentPopup;
   private _selfSaveCount = 0;
-  private spikeMcpServer: { stop(): Promise<void> } | null = null;
+  private mcpServer: { stop(): Promise<void>; address: string } | null = null;
+  deviceStore: DeviceLocalStore;
 
   async onload() {
     await this.loadSettings();
@@ -230,47 +240,75 @@ export default class AnnotatedPlugin extends Plugin {
       });
     });
 
+    this.deviceStore = new DeviceLocalStore(this.app);
     if (Platform.isDesktop) {
-      this.startSpikeMcpServer();
+      this.startMcpServer();
     }
 
     console.log("Annotated plugin loaded");
   }
 
-  // Step-1 spike (PLN — Event-Driven Comment Watch). Dynamic import keeps the
-  // MCP SDK and node builtins out of the mobile load path. Outcome is also
-  // appended to spike.log in the plugin dir so it can be read without devtools.
-  private async startSpikeMcpServer(): Promise<void> {
+  // In-plugin MCP server (PLN step 4). Dynamic import keeps the MCP SDK and
+  // node builtins out of the mobile load path; outcome is appended to mcp.log
+  // in the plugin dir so it can be read without devtools.
+  private async startMcpServer(): Promise<void> {
     const log = (msg: string) =>
       this.app.vault.adapter
         .append(
-          `${this.manifest.dir}/spike.log`,
+          `${this.manifest.dir}/mcp.log`,
           `${new Date().toISOString()} [v${this.manifest.version}] ${msg}\n`,
         )
         .catch(() => {});
     try {
-      const { SpikeMcpServer } = await import("./mcp/SpikeMcpServer");
-      const server = new SpikeMcpServer({
-        vaultName: this.app.vault.getName(),
-        pluginVersion: this.manifest.version,
+      const device = this.deviceStore.load();
+      if (!device.enabled) {
+        await log("server disabled on this device");
+        return;
+      }
+      const { AnnotatedMcpServer } = await import("./mcp/AnnotatedMcpServer");
+      const getIdentities = () => this.settings.identities;
+      const getEnvKeys = await loadEnvKeys(getIdentities, (warning) => {
+        console.warn(`Annotated: ${warning}`);
+        log(`warn: ${warning}`);
       });
+      const server = new AnnotatedMcpServer(
+        {
+          store: this.commentManager.store,
+          notes: buildNoteAccess(this.app.vault),
+          auth: buildAuthProvider(getIdentities, this.deviceStore, getEnvKeys),
+          info: {
+            vaultName: this.app.vault.getName(),
+            pluginVersion: this.manifest.version,
+          },
+          onLog: (msg) => log(msg),
+        },
+        resolveBindConfig(device),
+      );
       await server.start();
-      this.spikeMcpServer = server;
-      console.log(`Annotated: spike MCP server listening at ${server.address}/mcp`);
+      this.mcpServer = server;
+      console.log(`Annotated: MCP server listening at ${server.address}/mcp`);
       await log(`listening at ${server.address}/mcp`);
     } catch (err) {
-      console.error("Annotated: spike MCP server failed to start", err);
+      console.error("Annotated: MCP server failed to start", err);
       await log(
         `failed to start: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
       );
     }
   }
 
+  async restartMcpServer(): Promise<void> {
+    await this.mcpServer?.stop().catch(() => {});
+    this.mcpServer = null;
+    if (Platform.isDesktop) {
+      await this.startMcpServer();
+    }
+  }
+
   onunload() {
-    this.spikeMcpServer?.stop().catch((err) => {
-      console.error("Annotated: spike MCP server failed to stop", err);
+    this.mcpServer?.stop().catch((err) => {
+      console.error("Annotated: MCP server failed to stop", err);
     });
-    this.spikeMcpServer = null;
+    this.mcpServer = null;
     this.commentPopup.destroy();
     this.commentManager.clearCache();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_COMMENT_SIDEBAR);
@@ -901,6 +939,262 @@ class AnnotatedSettingTab extends PluginSettingTab {
             this.refreshActiveGutter();
           }),
       );
+
+    this.displayIdentitySection(containerEl);
+    if (Platform.isDesktop) {
+      this.displayMcpSection(containerEl);
+    }
+  }
+
+  // ── Identities (synced via data.json — PLN Decision 4b) ──────
+
+  private displayIdentitySection(containerEl: HTMLElement): void {
+    containerEl.createEl("h3", { text: strings.settings.sections.identities });
+    containerEl.createEl("p", {
+      text: strings.settings.identities.desc,
+      cls: "setting-item-description",
+    });
+
+    if (this.plugin.settings.identities.length === 0) {
+      containerEl.createEl("p", {
+        text: strings.settings.identities.empty,
+        cls: "setting-item-description",
+      });
+    }
+
+    for (const identity of this.plugin.settings.identities) {
+      new Setting(containerEl)
+        .setName(identity.name)
+        .setDesc(identity.id)
+        .addText((text) =>
+          text.setValue(identity.name).onChange(async (value) => {
+            if (!value.trim()) return;
+            identity.name = value.trim();
+            await this.plugin.saveSettings();
+          }),
+        )
+        .addExtraButton((btn) =>
+          btn
+            .setIcon("trash")
+            .setTooltip(strings.settings.identities.deleteTooltip)
+            .onClick(async () => {
+              this.plugin.settings.identities = this.plugin.settings.identities.filter(
+                (i) => i.id !== identity.id,
+              );
+              await this.plugin.saveSettings();
+              new Notice(strings.settings.identities.deleted(identity.name));
+              this.display();
+            }),
+        );
+    }
+
+    let newName = "";
+    new Setting(containerEl)
+      .addText((text) =>
+        text
+          .setPlaceholder(strings.settings.identities.addPlaceholder)
+          .onChange((value) => (newName = value)),
+      )
+      .addButton((btn) =>
+        btn.setButtonText(strings.settings.identities.addButton).onClick(async () => {
+          const name = newName.trim();
+          if (!name) return;
+          this.plugin.settings.identities.push({ id: generateIdentityId(), name });
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      );
+  }
+
+  // ── MCP server + keys (device-local — PLN Decision 4b) ───────
+
+  private displayMcpSection(containerEl: HTMLElement): void {
+    const device = this.plugin.deviceStore.load();
+    containerEl.createEl("h3", { text: strings.settings.sections.mcp });
+
+    new Setting(containerEl)
+      .setName(strings.settings.mcp.enabled.name)
+      .setDesc(strings.settings.mcp.enabled.desc)
+      .addToggle((toggle) =>
+        toggle.setValue(device.enabled).onChange(async (value) => {
+          const config = this.plugin.deviceStore.load();
+          config.enabled = value;
+          this.plugin.deviceStore.save(config);
+          await this.plugin.restartMcpServer();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName(strings.settings.mcp.port.name)
+      .setDesc(strings.settings.mcp.port.desc)
+      .addText((text) =>
+        text.setValue(String(device.port)).onChange(async (value) => {
+          const port = Number(value);
+          if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+          const config = this.plugin.deviceStore.load();
+          config.port = port;
+          this.plugin.deviceStore.save(config);
+          await this.plugin.restartMcpServer();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName(strings.settings.mcp.host.name)
+      .setDesc(strings.settings.mcp.host.desc)
+      .addText((text) =>
+        text.setValue(device.host).onChange(async (value) => {
+          if (!value.trim()) return;
+          const config = this.plugin.deviceStore.load();
+          config.host = value.trim();
+          this.plugin.deviceStore.save(config);
+          await this.plugin.restartMcpServer();
+        }),
+      );
+
+    containerEl.createEl("h4", { text: strings.settings.mcp.keysHeading });
+    containerEl.createEl("p", {
+      text: strings.settings.mcp.keysDesc,
+      cls: "setting-item-description",
+    });
+
+    if (device.keys.length === 0) {
+      containerEl.createEl("p", {
+        text: strings.settings.mcp.noKeys,
+        cls: "setting-item-description",
+      });
+    }
+
+    // One row per pair; legacy unpaired keys get their own row.
+    const groups = new Map<string, typeof device.keys>();
+    for (const key of device.keys) {
+      const groupId = key.pairId ?? key.tokenHash;
+      const group = groups.get(groupId);
+      if (group) group.push(key);
+      else groups.set(groupId, [key]);
+    }
+
+    for (const [groupId, keys] of groups) {
+      const first = keys[0];
+      const identity = this.plugin.settings.identities.find((i) => i.id === first.identityId);
+      const fence = first.pathScope?.length
+        ? first.pathScope.map((f) => f + "/").join(", ")
+        : strings.settings.mcp.wholeVault;
+      const name = identity
+        ? `${identity.name}${first.label ? " — " + first.label : ""}`
+        : strings.settings.mcp.orphanedKey;
+      const setting = new Setting(containerEl).setName(name).setDesc(fence);
+
+      const addCopy = (label: string, scope: "full" | "watch") => {
+        const record = keys.find((k) => k.scope === scope);
+        if (!record) return;
+        setting.addButton((btn) =>
+          btn
+            .setButtonText(label)
+            .setTooltip(strings.settings.mcp.copyTooltip(label))
+            .onClick(async () => {
+              if (!record.token) {
+                new Notice(strings.settings.mcp.legacyNoToken);
+                return;
+              }
+              await navigator.clipboard.writeText(record.token);
+              new Notice(strings.settings.mcp.copied(label));
+            }),
+        );
+      };
+      addCopy(strings.settings.mcp.pollName, "watch");
+      addCopy(strings.settings.mcp.writeName, "full");
+
+      setting.addExtraButton((btn) =>
+        btn
+          .setIcon("trash")
+          .setTooltip(strings.settings.mcp.revokeTooltip)
+          .onClick(() => {
+            this.plugin.deviceStore.revokePair(groupId);
+            new Notice(strings.settings.mcp.revoked);
+            this.display();
+          }),
+      );
+    }
+
+    let mintIdentityId = this.plugin.settings.identities[0]?.id ?? "";
+    let mintLabel = "";
+    const mintFence = new Set<string>();
+
+    const mintGroup = containerEl.createDiv({ cls: "annotated-mint-group" });
+
+    new Setting(mintGroup)
+      .setName(strings.settings.mcp.newKey)
+      .addDropdown((dropdown) => {
+        for (const identity of this.plugin.settings.identities) {
+          dropdown.addOption(identity.id, identity.name);
+        }
+        dropdown.setValue(mintIdentityId).onChange((value) => (mintIdentityId = value));
+      })
+      .addText((text) =>
+        text
+          .setPlaceholder(strings.settings.mcp.labelPlaceholder)
+          .onChange((value) => (mintLabel = value)),
+      );
+
+    const rootFolders = this.app.vault
+      .getRoot()
+      .children.filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b));
+
+    const fenceSetting = new Setting(mintGroup)
+      .setName(strings.settings.mcp.fenceName)
+      .setDesc(strings.settings.mcp.fenceDesc);
+    const fenceOptions = fenceSetting.controlEl.createDiv({ cls: "annotated-fence-options" });
+    for (const folder of rootFolders) {
+      const label = fenceOptions.createEl("label");
+      const checkbox = label.createEl("input", { type: "checkbox" });
+      label.appendText(folder + "/");
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) mintFence.add(folder);
+        else mintFence.delete(folder);
+      });
+    }
+
+    new Setting(mintGroup).addButton((btn) =>
+      btn
+        .setButtonText(strings.settings.mcp.mintButton)
+        .setCta()
+        .onClick(async () => {
+          if (!mintIdentityId) {
+            new Notice(strings.settings.mcp.mintNeedsIdentity);
+            return;
+          }
+          // Always a pair: the agent acts with full (read/write), its monitor
+          // polls with watch. Standalone keys have no use case (LOG 2026-06-12).
+          await this.plugin.deviceStore.mintPair(
+            mintIdentityId,
+            mintLabel.trim() || undefined,
+            [...mintFence],
+          );
+          new Notice(strings.settings.mcp.mintedPair);
+          this.display();
+        }),
+    );
+
+    this.displayEnvKeysNote(containerEl);
+  }
+
+  private displayEnvKeysNote(containerEl: HTMLElement): void {
+    const envCount = (process?.env?.ANNOTATED_MCP_KEYS && (() => {
+      try {
+        const parsed = JSON.parse(process.env.ANNOTATED_MCP_KEYS!);
+        return Array.isArray(parsed) ? parsed.length : 0;
+      } catch {
+        return 0;
+      }
+    })()) || 0;
+    if (envCount > 0) {
+      containerEl.createEl("p", {
+        text: strings.settings.mcp.envKeys(envCount),
+        cls: "setting-item-description",
+      });
+    }
   }
 
   private refreshActiveGutter(): void {
