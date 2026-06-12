@@ -61,6 +61,10 @@
           "type": "string",
           "description": "Display name of the person who created this comment."
         },
+        "author_id": {
+          "type": "string",
+          "description": "Identity id of the author, present when the comment was written by a key-authenticated writer (the server derives author from the bearer key's identity). The id is stable across identity renames; 'author' holds the display name at write time."
+        },
         "created_at": {
           "type": "string",
           "format": "date-time",
@@ -91,6 +95,10 @@
         "resolved_by": {
           "type": "string",
           "description": "Author who resolved this comment. Present only when status is 'resolved'."
+        },
+        "resolved_by_id": {
+          "type": "string",
+          "description": "Identity id of the resolver, present when resolved by a key-authenticated writer. Stable across identity renames."
         },
         "replies": {
           "type": "array",
@@ -128,6 +136,10 @@
         "author": {
           "type": "string",
           "description": "Display name of the reply author."
+        },
+        "author_id": {
+          "type": "string",
+          "description": "Identity id of the reply author, present when written by a key-authenticated writer. Stable across identity renames; 'author' holds the display name at write time."
         },
         "created_at": {
           "type": "string",

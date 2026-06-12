@@ -23,6 +23,7 @@ export type CommentStatus = "open" | "resolved";
 export interface CommentReply {
 	id: string;
 	author: string;
+	author_id?: string;  // identity id when written by a key-authenticated writer (PLN Decision 4)
 	created_at: string;  // ISO 8601
 	updated_at: string;  // ISO 8601
 	content: string;
@@ -32,6 +33,7 @@ export interface CommentReply {
 export interface Comment {
 	id: string;
 	author: string;
+	author_id?: string;   // identity id when written by a key-authenticated writer (PLN Decision 4)
 	created_at: string;   // ISO 8601
 	updated_at: string;   // ISO 8601
 	location: Location;
@@ -39,6 +41,7 @@ export interface Comment {
 	status: CommentStatus;
 	resolved_at?: string;  // ISO 8601
 	resolved_by?: string;
+	resolved_by_id?: string;  // identity id when resolved by a key-authenticated writer
 	replies: CommentReply[];
 	last_activity_at: string;  // ISO 8601 — created_at or latest reply's created_at
 	content_snippet?: string;  // first 50 chars of the annotated line
