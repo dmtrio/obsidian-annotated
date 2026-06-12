@@ -9,7 +9,12 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
+const mode = process.argv[2];
+const prod = mode === "production" || mode === "production-lite";
+// Lite build (community-store artifact): the OAuth gate is tree-shaken out
+// entirely — express and the SDK auth router never enter main.js.
+// PLN — MCP OAuth Shim, D6.
+const includeOAuth = mode !== "production-lite";
 
 // The MCP SDK imports builtins via the "node:" prefix; mark them external and
 // strip the prefix so the bundle emits require("crypto") etc., which Obsidian's
@@ -46,8 +51,13 @@ const context = await esbuild.context({
 		"@lezer/lr",
 		...builtins],
 	plugins: [nodePrefixExternal],
+	define: {
+		BUILD_OAUTH: JSON.stringify(includeOAuth),
+	},
 	format: "cjs",
-	target: "es2018",
+	// es2020: the OAuth gate's dependency tree contains BigInt literals
+	// (es2018-incompatible); Obsidian 1.5+ Electron handles es2020 fine.
+	target: "es2020",
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
