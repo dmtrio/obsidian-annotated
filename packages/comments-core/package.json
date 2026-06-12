@@ -1,0 +1,16 @@
+{
+  "name": "@annotated/comments-core",
+  "version": "0.1.0",
+  "description": "Shared comment model for Obsidian Annotated: types, JSON schema, CRUD over a pluggable storage adapter, and the needs-attention/actionable query. Canonical home of the .comments.json sidecar format.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "files": [
+    "src",
+    "dist",
+    "schemas"
+  ],
+  "license": "MIT"
+}

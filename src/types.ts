@@ -1,66 +1,17 @@
-// ── Location Types ──────────────────────────────────────────────
+// ── Comment Model ───────────────────────────────────────────────
+// Canonical home is @annotated/comments-core (types + schema + CRUD);
+// re-exported here so existing "../types" imports keep working.
 
-export interface RangeLocation {
-	type: "range";
-	start_line: number;  // 1-indexed
-	start_char: number;  // 0-indexed offset in line
-	end_line: number;    // 1-indexed
-	end_char: number;    // 0-indexed offset in line
-}
-
-export type Location = RangeLocation;
-
-// ── Comment Status ─────────────────────────────────────────────
-
-export type CommentStatus = "open" | "resolved";
-
-// ── Comments ───────────────────────────────────────────────────
-
-export interface CommentReply {
-	id: string;
-	author: string;
-	created_at: string;  // ISO 8601
-	updated_at: string;  // ISO 8601
-	content: string;
-	status: CommentStatus;
-}
-
-export interface Comment {
-	id: string;
-	author: string;
-	created_at: string;   // ISO 8601
-	updated_at: string;   // ISO 8601
-	location: Location;
-	content: string;
-	status: CommentStatus;
-	resolved_at?: string;  // ISO 8601
-	resolved_by?: string;
-	replies: CommentReply[];
-	last_activity_at: string;  // ISO 8601 — created_at or latest reply's created_at
-	content_snippet?: string;  // first 50 chars of the annotated line
-	is_stale?: boolean;        // true if snippet couldn't be matched on open
-}
-
-// ── Comment File ───────────────────────────────────────────────
-
-export interface CommentFileMetadata {
-	total_comments: number;
-	open_count: number;
-	resolved_count: number;
-	authors: string[];
-}
-
-export const SCHEMA_VERSION = 1;
-
-export interface CommentFile {
-	version: number;
-	createdBy: string;
-	note_path: string;
-	created_at: string;   // ISO 8601
-	updated_at: string;   // ISO 8601
-	comments: Comment[];
-	metadata: CommentFileMetadata;
-}
+export {
+	SCHEMA_VERSION,
+	type Comment,
+	type CommentFile,
+	type CommentFileMetadata,
+	type CommentReply,
+	type CommentStatus,
+	type Location,
+	type RangeLocation,
+} from "@annotated/comments-core";
 
 // ── Plugin Settings ────────────────────────────────────────────
 

@@ -1,0 +1,150 @@
+import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "./types";
+import { CommentStorageAdapter } from "./storage";
+
+export interface CommentStoreOptions {
+	/** Stamped into new comment files, e.g. "obsidian-annotated@0.1.1". */
+	createdBy: string;
+	/** Called on read/parse failures (the store returns null in that case). */
+	onError?: (message: string, cause: unknown) => void;
+}
+
+/**
+ * CRUD over .comments.json sidecars. Extracted verbatim from the plugin's
+ * CommentManager — same semantics, storage injected instead of vault-bound.
+ *
+ * Unknown sidecar fields are a contract, not an accident: reads are
+ * JSON.parse → mutate in place → stringify, so fields this version doesn't
+ * know about survive every mutating operation (covered by round-trip tests).
+ */
+export class CommentStore {
+	private cache: Map<string, CommentFile> = new Map();
+
+	constructor(
+		private readonly storage: CommentStorageAdapter,
+		private readonly options: CommentStoreOptions,
+	) {}
+
+	commentsPath(notePath: string): string {
+		return notePath + ".comments.json";
+	}
+
+	async getComments(notePath: string): Promise<CommentFile | null> {
+		const cached = this.cache.get(notePath);
+		if (cached) return cached;
+
+		const path = this.commentsPath(notePath);
+		if (!(await this.storage.exists(path))) return null;
+
+		try {
+			const raw = await this.storage.read(path);
+			const commentFile = JSON.parse(raw) as CommentFile;
+			this.cache.set(notePath, commentFile);
+			return commentFile;
+		} catch (e) {
+			this.options.onError?.(`Failed to parse comments file: ${path}`, e);
+			return null;
+		}
+	}
+
+	async saveComments(commentFile: CommentFile): Promise<void> {
+		this.recalculateMetadata(commentFile);
+		commentFile.updated_at = new Date().toISOString();
+		const path = this.commentsPath(commentFile.note_path);
+		await this.storage.write(path, JSON.stringify(commentFile, null, 2));
+		this.cache.set(commentFile.note_path, commentFile);
+	}
+
+	async addComment(notePath: string, comment: Comment): Promise<void> {
+		let commentFile = await this.getComments(notePath);
+		if (!commentFile) {
+			commentFile = this.createEmptyCommentFile(notePath);
+		}
+		commentFile.comments.push(comment);
+		await this.saveComments(commentFile);
+	}
+
+	async addReply(notePath: string, commentId: string, reply: CommentReply): Promise<void> {
+		const commentFile = await this.getComments(notePath);
+		if (!commentFile) return;
+
+		const comment = commentFile.comments.find((c) => c.id === commentId);
+		if (!comment) return;
+
+		comment.replies.push(reply);
+		comment.updated_at = new Date().toISOString();
+		comment.last_activity_at = reply.created_at;
+		if (comment.status === "resolved") {
+			comment.status = "open";
+			comment.resolved_at = undefined;
+			comment.resolved_by = undefined;
+		}
+		await this.saveComments(commentFile);
+	}
+
+	async resolveComment(notePath: string, commentId: string, resolvedBy: string): Promise<void> {
+		const commentFile = await this.getComments(notePath);
+		if (!commentFile) return;
+
+		const comment = commentFile.comments.find((c) => c.id === commentId);
+		if (!comment) return;
+
+		comment.status = "resolved";
+		comment.resolved_at = new Date().toISOString();
+		comment.resolved_by = resolvedBy;
+		comment.updated_at = comment.resolved_at;
+		await this.saveComments(commentFile);
+	}
+
+	invalidateCache(notePath: string): void {
+		this.cache.delete(notePath);
+	}
+
+	clearCache(): void {
+		this.cache.clear();
+	}
+
+	private recalculateMetadata(commentFile: CommentFile): void {
+		const comments = commentFile.comments;
+		const authors = new Set<string>();
+		let open = 0, resolved = 0;
+
+		for (const c of comments) {
+			authors.add(c.author);
+			if (c.status === "open") open++;
+			else if (c.status === "resolved") resolved++;
+
+			for (const r of c.replies) {
+				authors.add(r.author);
+			}
+		}
+
+		commentFile.metadata = {
+			total_comments: comments.length,
+			open_count: open,
+			resolved_count: resolved,
+			authors: [...authors],
+		};
+	}
+
+	private createEmptyCommentFile(notePath: string): CommentFile {
+		const now = new Date().toISOString();
+		return {
+			version: SCHEMA_VERSION,
+			createdBy: this.options.createdBy,
+			note_path: notePath,
+			created_at: now,
+			updated_at: now,
+			comments: [],
+			metadata: {
+				total_comments: 0,
+				open_count: 0,
+				resolved_count: 0,
+				authors: [],
+			},
+		};
+	}
+
+	generateId(): string {
+		return "c_" + Date.now().toString(36) + crypto.randomUUID().slice(0, 5);
+	}
+}
