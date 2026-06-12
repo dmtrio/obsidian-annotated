@@ -115,6 +115,19 @@ export class CommentSidebarView extends ItemView {
   }
 
   private async renderAll(container: HTMLElement): Promise<void> {
+    // No identity registry yet (fresh install): commenting is gated until
+    // the user creates their first identity in settings.
+    if (!this.plugin.getUiAuthor()) {
+      const empty = container.createDiv({ cls: "annotated-sidebar-setup" });
+      empty.createEl("p", { text: strings.sidebar.setupNeeded });
+      const btn = empty.createEl("button", {
+        text: strings.sidebar.setupButton,
+        cls: "annotated-popup-btn",
+      });
+      btn.addEventListener("click", () => this.plugin.openPluginSettings());
+      return;
+    }
+
     if (this.viewMode === "thread" && this.threadCommentId) {
       await this.renderThreadView(container);
       return;

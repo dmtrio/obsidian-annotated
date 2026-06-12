@@ -299,10 +299,12 @@ export default class AnnotatedPlugin extends Plugin {
   /**
    * The identity this device's human writes as (PLN step 6). Selection is
    * device-local; the identity itself lives in the synced registry.
-   * First call migrates a legacy defaultAuthor (unless it's the colliding
-   * "claude" default) or seeds an identity from the OS username.
+   * Returns null on a fresh install — commenting is gated on creating the
+   * first identity (a silent seed would write an unchosen name into synced
+   * attribution data forever). A legacy non-"claude" defaultAuthor migrates
+   * into the registry automatically.
    */
-  getUiAuthor(): Identity {
+  getUiAuthor(): Identity | null {
     const device = this.deviceStore.load();
     const selected = device.uiIdentityId
       ? this.settings.identities.find((i) => i.id === device.uiIdentityId)
@@ -310,20 +312,44 @@ export default class AnnotatedPlugin extends Plugin {
     if (selected) return selected;
 
     const legacy = this.settings.defaultAuthor?.trim();
-    const wantName =
-      legacy && legacy.toLowerCase() !== "claude"
-        ? legacy
-        : (typeof process !== "undefined" && process.env?.USER) || "Me";
-
-    let identity = this.settings.identities.find((i) => i.name === wantName);
-    if (!identity) {
-      identity = { id: generateIdentityId(), name: wantName };
-      this.settings.identities.push(identity);
-      void this.saveSettings();
+    if (legacy && legacy.toLowerCase() !== "claude") {
+      let identity = this.settings.identities.find((i) => i.name === legacy);
+      if (!identity) {
+        identity = { id: generateIdentityId(), name: legacy };
+        this.settings.identities.push(identity);
+        void this.saveSettings();
+      }
+      device.uiIdentityId = identity.id;
+      this.deviceStore.save(device);
+      return identity;
     }
-    device.uiIdentityId = identity.id;
-    this.deviceStore.save(device);
+
+    if (this.settings.identities.length > 0) {
+      const identity = this.settings.identities[0];
+      device.uiIdentityId = identity.id;
+      this.deviceStore.save(device);
+      return identity;
+    }
+
+    return null;
+  }
+
+  /** Gate for UI comment actions: identity or a pointer to settings. */
+  requireUiAuthor(): Identity | null {
+    const identity = this.getUiAuthor();
+    if (!identity) {
+      new Notice(strings.notices.needIdentity);
+      this.openPluginSettings();
+    }
     return identity;
+  }
+
+  openPluginSettings(): void {
+    const setting = (this.app as unknown as {
+      setting?: { open?: () => void; openTabById?: (id: string) => void };
+    }).setting;
+    setting?.open?.();
+    setting?.openTabById?.(this.manifest.id);
   }
 
   async restartMcpServer(): Promise<void> {
@@ -691,7 +717,8 @@ export default class AnnotatedPlugin extends Plugin {
       end_char: to.ch,
     };
 
-    const uiAuthor = this.getUiAuthor();
+    const uiAuthor = this.requireUiAuthor();
+    if (!uiAuthor) return;
     const makeOnSubmit =
       (loc: RangeLocation) => async (content: string, author: string) => {
         const now = new Date().toISOString();
@@ -780,7 +807,8 @@ export default class AnnotatedPlugin extends Plugin {
     const filePath = mdView.file.path;
     const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
 
-    const uiAuthor = this.getUiAuthor();
+    const uiAuthor = this.requireUiAuthor();
+    if (!uiAuthor) return;
     this.openCommentModal({
       mode: "reply",
       author: uiAuthor.name,
@@ -817,7 +845,8 @@ export default class AnnotatedPlugin extends Plugin {
     const filePath = mdView.file.path;
     const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
 
-    const uiAuthor = this.getUiAuthor();
+    const uiAuthor = this.requireUiAuthor();
+    if (!uiAuthor) return;
     this.commentManager
       .resolveComment(filePath, comment.id, uiAuthor.name, uiAuthor.id)
       .then(async () => {
@@ -898,7 +927,8 @@ class AnnotatedSettingTab extends PluginSettingTab {
           for (const identity of this.plugin.settings.identities) {
             dropdown.addOption(identity.id, identity.name);
           }
-          dropdown.setValue(uiAuthor.id).onChange((value) => {
+          if (uiAuthor) dropdown.setValue(uiAuthor.id);
+          dropdown.onChange((value) => {
             const device = this.plugin.deviceStore.load();
             device.uiIdentityId = value;
             this.plugin.deviceStore.save(device);

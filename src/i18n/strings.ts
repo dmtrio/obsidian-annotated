@@ -66,6 +66,7 @@ export const strings = {
 		exportFailed: "Failed to copy to clipboard \u2014 your browser may have blocked access",
 		reselectLocation: "Select new location in the editor",
 		reselectCancelled: "Re-select cancelled",
+		needIdentity: "Create an identity first — opening Annotated settings",
 	},
 	sidebar: {
 		noActiveNote: "No active note",
@@ -78,6 +79,8 @@ export const strings = {
 		noSection: (s: string) => `No ${s.toLowerCase()} comments`,
 		staleNotice: "\u26A0 Location may have shifted",
 		backToComments: "\u2190 Comments",
+		setupNeeded: "Annotated needs an identity before you can comment. Create one in the plugin settings \u2014 it takes a few seconds.",
+		setupButton: "Open Annotated settings",
 	},
 	popup: {
 		staleNotice: "This comment may have drifted from its original location.",

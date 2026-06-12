@@ -625,3 +625,13 @@
   width: 320px;
   margin-right: 8px;
 }
+.annotated-sidebar-setup {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
