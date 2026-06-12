@@ -857,20 +857,54 @@ class AnnotatedSettingTab extends PluginSettingTab {
     // ── Author ──
     containerEl.createEl("h3", { text: strings.settings.sections.author });
 
-    const uiAuthor = this.plugin.getUiAuthor();
-    new Setting(containerEl)
-      .setName(strings.settings.defaultAuthor.name)
-      .setDesc(strings.settings.defaultAuthor.desc)
-      .addDropdown((dropdown) => {
-        for (const identity of this.plugin.settings.identities) {
-          dropdown.addOption(identity.id, identity.name);
-        }
-        dropdown.setValue(uiAuthor.id).onChange((value) => {
-          const device = this.plugin.deviceStore.load();
-          device.uiIdentityId = value;
-          this.plugin.deviceStore.save(device);
+    const legacy = this.plugin.settings.defaultAuthor?.trim();
+    const hasMigratableLegacy = !!legacy && legacy.toLowerCase() !== "claude";
+    if (this.plugin.settings.identities.length === 0 && !hasMigratableLegacy) {
+      // Truly fresh install: creating the first identity is an explicit,
+      // named act — not a silent OS-username seed.
+      let firstName =
+        (typeof process !== "undefined" && process.env?.USER) || "";
+      new Setting(containerEl)
+        .setName(strings.settings.defaultAuthor.name)
+        .setDesc(strings.settings.identities.firstRunDesc)
+        .addText((text) =>
+          text
+            .setValue(firstName)
+            .setPlaceholder(strings.settings.identities.addPlaceholder)
+            .onChange((value) => (firstName = value)),
+        )
+        .addButton((btn) =>
+          btn
+            .setButtonText(strings.settings.identities.firstRunButton)
+            .setCta()
+            .onClick(async () => {
+              const name = firstName.trim();
+              if (!name) return;
+              const identity = { id: generateIdentityId(), name };
+              this.plugin.settings.identities.push(identity);
+              await this.plugin.saveSettings();
+              const device = this.plugin.deviceStore.load();
+              device.uiIdentityId = identity.id;
+              this.plugin.deviceStore.save(device);
+              this.display();
+            }),
+        );
+    } else {
+      const uiAuthor = this.plugin.getUiAuthor();
+      new Setting(containerEl)
+        .setName(strings.settings.defaultAuthor.name)
+        .setDesc(strings.settings.defaultAuthor.desc)
+        .addDropdown((dropdown) => {
+          for (const identity of this.plugin.settings.identities) {
+            dropdown.addOption(identity.id, identity.name);
+          }
+          dropdown.setValue(uiAuthor.id).onChange((value) => {
+            const device = this.plugin.deviceStore.load();
+            device.uiIdentityId = value;
+            this.plugin.deviceStore.save(device);
+          });
         });
-      });
+    }
 
     // ── Display ──
     containerEl.createEl("h3", { text: strings.settings.sections.display });

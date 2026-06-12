@@ -12,6 +12,8 @@ export const strings = {
 			desc: "Who can author comments. Identities sync between your Obsidian instances; access keys (below) never do.",
 			addPlaceholder: "New identity name",
 			addButton: "Add identity",
+			firstRunDesc: "Name yourself to start commenting — this creates your first identity (you can add more below).",
+			firstRunButton: "Create identity",
 			deleteTooltip: "Delete identity (keys bound to it stop working)",
 			deleted: (name: string) => `Identity "${name}" deleted — any keys bound to it are now invalid`,
 			empty: "No identities yet — add one to mint access keys.",
