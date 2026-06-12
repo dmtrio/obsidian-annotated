@@ -48,6 +48,12 @@ export const strings = {
 			desc: "Who comments from this device are authored as. Identities are managed below and sync with the vault; this selection stays on this device.",
 			placeholder: "author",
 		},
+		hotkey: {
+			name: "Add-comment shortcut",
+			desc: (key: string) => `Currently ${key}. Rebind it in Obsidian's Hotkeys settings.`,
+			unset: "No shortcut bound. Set one in Obsidian's Hotkeys settings.",
+			button: "Customize",
+		},
 		showGutter: { name: "Show gutter indicators", desc: "Show comment markers in the editor gutter" },
 		indicatorStyle: { name: "Comment indicator style", desc: "How comments are indicated in the gutter" },
 		indicatorOptions: { icon: "Icon", badge: "Badge", highlight: "Highlight" },

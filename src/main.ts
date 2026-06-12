@@ -205,8 +205,9 @@ export default class AnnotatedPlugin extends Plugin {
         if (!mdView?.file) return;
         const file = mdView.file;
         menu.addItem((item) => {
+          const hotkey = this.getAddCommentHotkeyLabel();
           item
-            .setTitle(strings.commands.addComment)
+            .setTitle(hotkey ? `${strings.commands.addComment} (${hotkey})` : strings.commands.addComment)
             .setIcon("message-square")
             .onClick(() => this.addCommentAtCursor(editor, file));
         });
@@ -350,6 +351,42 @@ export default class AnnotatedPlugin extends Plugin {
     }).setting;
     setting?.open?.();
     setting?.openTabById?.(this.manifest.id);
+  }
+
+  /** Current add-comment binding (custom or default), formatted for display. */
+  getAddCommentHotkeyLabel(): string | null {
+    const commandId = "obsidian-annotated:add-comment";
+    const hm = (this.app as unknown as {
+      hotkeyManager?: {
+        getHotkeys?: (id: string) => Array<{ modifiers: string[]; key: string }> | null;
+        getDefaultHotkeys?: (id: string) => Array<{ modifiers: string[]; key: string }> | null;
+      };
+    }).hotkeyManager;
+    const hotkey = (hm?.getHotkeys?.(commandId) ?? hm?.getDefaultHotkeys?.(commandId))?.[0];
+    if (!hotkey) return null;
+    const mac = Platform.isMacOS;
+    const mods = hotkey.modifiers
+      .map((m) =>
+        m === "Mod"
+          ? mac ? "⌘" : "Ctrl+"
+          : m === "Shift"
+            ? mac ? "⇧" : "Shift+"
+            : m === "Alt"
+              ? mac ? "⌥" : "Alt+"
+              : m === "Ctrl"
+                ? mac ? "⌃" : "Ctrl+"
+                : m,
+      )
+      .join("");
+    return mods + hotkey.key.toUpperCase();
+  }
+
+  openHotkeySettings(): void {
+    const setting = (this.app as unknown as {
+      setting?: { open?: () => void; openTabById?: (id: string) => { setQuery?: (q: string) => void } | undefined };
+    }).setting;
+    setting?.open?.();
+    setting?.openTabById?.("hotkeys")?.setQuery?.("Annotated:");
   }
 
   async restartMcpServer(): Promise<void> {
@@ -936,6 +973,16 @@ class AnnotatedSettingTab extends PluginSettingTab {
         });
     }
 
+    const hotkey = this.plugin.getAddCommentHotkeyLabel();
+    new Setting(containerEl)
+      .setName(strings.settings.hotkey.name)
+      .setDesc(hotkey ? strings.settings.hotkey.desc(hotkey) : strings.settings.hotkey.unset)
+      .addButton((btn) =>
+        btn
+          .setButtonText(strings.settings.hotkey.button)
+          .onClick(() => this.plugin.openHotkeySettings()),
+      );
+
     // ── Display ──
     containerEl.createEl("h3", { text: strings.settings.sections.display });
 
@@ -1160,65 +1207,6 @@ class AnnotatedSettingTab extends PluginSettingTab {
       cls: "setting-item-description",
     });
 
-    if (device.keys.length === 0) {
-      containerEl.createEl("p", {
-        text: strings.settings.mcp.noKeys,
-        cls: "setting-item-description",
-      });
-    }
-
-    // One row per pair; legacy unpaired keys get their own row.
-    const groups = new Map<string, typeof device.keys>();
-    for (const key of device.keys) {
-      const groupId = key.pairId ?? key.tokenHash;
-      const group = groups.get(groupId);
-      if (group) group.push(key);
-      else groups.set(groupId, [key]);
-    }
-
-    for (const [groupId, keys] of groups) {
-      const first = keys[0];
-      const identity = this.plugin.settings.identities.find((i) => i.id === first.identityId);
-      const fence = first.pathScope?.length
-        ? first.pathScope.map((f) => f + "/").join(", ")
-        : strings.settings.mcp.wholeVault;
-      const name = identity
-        ? `${identity.name}${first.label ? " — " + first.label : ""}`
-        : strings.settings.mcp.orphanedKey;
-      const setting = new Setting(containerEl).setName(name).setDesc(fence);
-
-      const addCopy = (label: string, scope: "full" | "watch") => {
-        const record = keys.find((k) => k.scope === scope);
-        if (!record) return;
-        setting.addButton((btn) =>
-          btn
-            .setButtonText(label)
-            .setTooltip(strings.settings.mcp.copyTooltip(label))
-            .onClick(async () => {
-              if (!record.token) {
-                new Notice(strings.settings.mcp.legacyNoToken);
-                return;
-              }
-              await navigator.clipboard.writeText(record.token);
-              new Notice(strings.settings.mcp.copied(label));
-            }),
-        );
-      };
-      addCopy(strings.settings.mcp.pollName, "watch");
-      addCopy(strings.settings.mcp.writeName, "full");
-
-      setting.addExtraButton((btn) =>
-        btn
-          .setIcon("trash")
-          .setTooltip(strings.settings.mcp.revokeTooltip)
-          .onClick(() => {
-            this.plugin.deviceStore.revokePair(groupId);
-            new Notice(strings.settings.mcp.revoked);
-            this.display();
-          }),
-      );
-    }
-
     let mintIdentityId = this.plugin.settings.identities[0]?.id ?? "";
     let mintLabel = "";
     const mintFence = new Set<string>();
@@ -1279,6 +1267,65 @@ class AnnotatedSettingTab extends PluginSettingTab {
           this.display();
         }),
     );
+
+    if (device.keys.length === 0) {
+      containerEl.createEl("p", {
+        text: strings.settings.mcp.noKeys,
+        cls: "setting-item-description",
+      });
+    }
+
+    // One row per pair; legacy unpaired keys get their own row.
+    const groups = new Map<string, typeof device.keys>();
+    for (const key of device.keys) {
+      const groupId = key.pairId ?? key.tokenHash;
+      const group = groups.get(groupId);
+      if (group) group.push(key);
+      else groups.set(groupId, [key]);
+    }
+
+    for (const [groupId, keys] of groups) {
+      const first = keys[0];
+      const identity = this.plugin.settings.identities.find((i) => i.id === first.identityId);
+      const fence = first.pathScope?.length
+        ? first.pathScope.map((f) => f + "/").join(", ")
+        : strings.settings.mcp.wholeVault;
+      const name = identity
+        ? `${identity.name}${first.label ? " — " + first.label : ""}`
+        : strings.settings.mcp.orphanedKey;
+      const setting = new Setting(containerEl).setName(name).setDesc(fence);
+
+      const addCopy = (label: string, scope: "full" | "watch") => {
+        const record = keys.find((k) => k.scope === scope);
+        if (!record) return;
+        setting.addButton((btn) =>
+          btn
+            .setButtonText(label)
+            .setTooltip(strings.settings.mcp.copyTooltip(label))
+            .onClick(async () => {
+              if (!record.token) {
+                new Notice(strings.settings.mcp.legacyNoToken);
+                return;
+              }
+              await navigator.clipboard.writeText(record.token);
+              new Notice(strings.settings.mcp.copied(label));
+            }),
+        );
+      };
+      addCopy(strings.settings.mcp.pollName, "watch");
+      addCopy(strings.settings.mcp.writeName, "full");
+
+      setting.addExtraButton((btn) =>
+        btn
+          .setIcon("trash")
+          .setTooltip(strings.settings.mcp.revokeTooltip)
+          .onClick(() => {
+            this.plugin.deviceStore.revokePair(groupId);
+            new Notice(strings.settings.mcp.revoked);
+            this.display();
+          }),
+      );
+    }
 
     this.displayEnvKeysNote(containerEl);
   }
