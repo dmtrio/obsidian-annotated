@@ -126,6 +126,14 @@ describe("CommentStore", () => {
 			expect(file.comments[0].resolved_at).toBeDefined();
 		});
 
+		it("resolveComment carries the resolver's identity id when given", async () => {
+			await store.addComment("note.md", makeComment({ id: "c_1" }));
+			await store.resolveComment("note.md", "c_1", "Claude", "i_claude");
+
+			const file = JSON.parse(await storage.read("note.md.comments.json")) as CommentFile;
+			expect(file.comments[0].resolved_by_id).toBe("i_claude");
+		});
+
 		it("addReply to a resolved comment reopens it and clears audit fields", async () => {
 			await store.addComment(
 				"note.md",

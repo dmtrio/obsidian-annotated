@@ -49,8 +49,13 @@ export class CommentManager {
 		return this.store.addReply(notePath, commentId, reply);
 	}
 
-	resolveComment(notePath: string, commentId: string, resolvedBy: string): Promise<void> {
-		return this.store.resolveComment(notePath, commentId, resolvedBy);
+	resolveComment(
+		notePath: string,
+		commentId: string,
+		resolvedBy: string,
+		resolvedById?: string,
+	): Promise<void> {
+		return this.store.resolveComment(notePath, commentId, resolvedBy, resolvedById);
 	}
 
 	invalidateCache(notePath: string): void {

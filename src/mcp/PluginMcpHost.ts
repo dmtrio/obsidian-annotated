@@ -34,6 +34,11 @@ export interface DeviceLocalMcpConfig {
 	port: number;
 	host: string;
 	keys: DeviceKeyRecord[];
+	/**
+	 * Which registry identity this device's human writes as (PLN step 6 /
+	 * Decision 4b: the UI-default author is per-device, never synced).
+	 */
+	uiIdentityId?: string;
 }
 
 const DEFAULT_DEVICE_CONFIG: DeviceLocalMcpConfig = {

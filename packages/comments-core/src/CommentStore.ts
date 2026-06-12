@@ -81,7 +81,12 @@ export class CommentStore {
 		await this.saveComments(commentFile);
 	}
 
-	async resolveComment(notePath: string, commentId: string, resolvedBy: string): Promise<void> {
+	async resolveComment(
+		notePath: string,
+		commentId: string,
+		resolvedBy: string,
+		resolvedById?: string,
+	): Promise<void> {
 		const commentFile = await this.getComments(notePath);
 		if (!commentFile) return;
 
@@ -91,6 +96,7 @@ export class CommentStore {
 		comment.status = "resolved";
 		comment.resolved_at = new Date().toISOString();
 		comment.resolved_by = resolvedBy;
+		comment.resolved_by_id = resolvedById;
 		comment.updated_at = comment.resolved_at;
 		await this.saveComments(commentFile);
 	}

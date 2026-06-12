@@ -41,7 +41,11 @@ export const strings = {
 			revoked: "Key pair revoked",
 			orphanedKey: "identity missing — key is invalid",
 		},
-		defaultAuthor: { name: "Default author", desc: "Author name used when creating comments", placeholder: "author" },
+		defaultAuthor: {
+			name: "Your identity",
+			desc: "Who comments from this device are authored as. Identities are managed below and sync with the vault; this selection stays on this device.",
+			placeholder: "author",
+		},
 		showGutter: { name: "Show gutter indicators", desc: "Show comment markers in the editor gutter" },
 		indicatorStyle: { name: "Comment indicator style", desc: "How comments are indicated in the gutter" },
 		indicatorOptions: { icon: "Icon", badge: "Badge", highlight: "Highlight" },

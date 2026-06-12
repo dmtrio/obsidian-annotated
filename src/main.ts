@@ -43,7 +43,7 @@ import {
   setCommentTrackerPositions,
   trackerCallbacks,
 } from "./editor/CommentPositionTracker";
-import { generateIdentityId } from "@annotated/comments-core";
+import { generateIdentityId, type Identity } from "@annotated/comments-core";
 import {
   buildAuthProvider,
   buildNoteAccess,
@@ -294,6 +294,36 @@ export default class AnnotatedPlugin extends Plugin {
         `failed to start: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
       );
     }
+  }
+
+  /**
+   * The identity this device's human writes as (PLN step 6). Selection is
+   * device-local; the identity itself lives in the synced registry.
+   * First call migrates a legacy defaultAuthor (unless it's the colliding
+   * "claude" default) or seeds an identity from the OS username.
+   */
+  getUiAuthor(): Identity {
+    const device = this.deviceStore.load();
+    const selected = device.uiIdentityId
+      ? this.settings.identities.find((i) => i.id === device.uiIdentityId)
+      : undefined;
+    if (selected) return selected;
+
+    const legacy = this.settings.defaultAuthor?.trim();
+    const wantName =
+      legacy && legacy.toLowerCase() !== "claude"
+        ? legacy
+        : (typeof process !== "undefined" && process.env?.USER) || "Me";
+
+    let identity = this.settings.identities.find((i) => i.name === wantName);
+    if (!identity) {
+      identity = { id: generateIdentityId(), name: wantName };
+      this.settings.identities.push(identity);
+      void this.saveSettings();
+    }
+    device.uiIdentityId = identity.id;
+    this.deviceStore.save(device);
+    return identity;
   }
 
   async restartMcpServer(): Promise<void> {
@@ -661,12 +691,16 @@ export default class AnnotatedPlugin extends Plugin {
       end_char: to.ch,
     };
 
+    const uiAuthor = this.getUiAuthor();
     const makeOnSubmit =
       (loc: RangeLocation) => async (content: string, author: string) => {
         const now = new Date().toISOString();
         const comment: Comment = {
           id: this.commentManager.generateId(),
           author,
+          // Free-text author edits in the modal are allowed; the identity id
+          // only applies when the name is the selected identity's.
+          author_id: author === uiAuthor.name ? uiAuthor.id : undefined,
           created_at: now,
           updated_at: now,
           location: loc,
@@ -685,7 +719,7 @@ export default class AnnotatedPlugin extends Plugin {
     this.openCommentModal(
       {
         mode: "create",
-        author: this.settings.defaultAuthor,
+        author: uiAuthor.name,
         location,
         snippet: captureSnippet(editor.getLine(from.line)),
         onSubmit: makeOnSubmit(location),
@@ -746,15 +780,17 @@ export default class AnnotatedPlugin extends Plugin {
     const filePath = mdView.file.path;
     const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
 
+    const uiAuthor = this.getUiAuthor();
     this.openCommentModal({
       mode: "reply",
-      author: this.settings.defaultAuthor,
+      author: uiAuthor.name,
       replyingTo: comment.author,
       onSubmit: async (content: string, author: string) => {
         const now = new Date().toISOString();
         const reply: CommentReply = {
           id: this.commentManager.generateId(),
           author,
+          author_id: author === uiAuthor.name ? uiAuthor.id : undefined,
           created_at: now,
           updated_at: now,
           content,
@@ -781,8 +817,9 @@ export default class AnnotatedPlugin extends Plugin {
     const filePath = mdView.file.path;
     const cmEditor = (mdView.editor as any).cm as EditorView | undefined;
 
+    const uiAuthor = this.getUiAuthor();
     this.commentManager
-      .resolveComment(filePath, comment.id, this.settings.defaultAuthor)
+      .resolveComment(filePath, comment.id, uiAuthor.name, uiAuthor.id)
       .then(async () => {
         await this.refreshGutterForFile(filePath);
         this.refreshSidebar();
@@ -820,18 +857,20 @@ class AnnotatedSettingTab extends PluginSettingTab {
     // ── Author ──
     containerEl.createEl("h3", { text: strings.settings.sections.author });
 
+    const uiAuthor = this.plugin.getUiAuthor();
     new Setting(containerEl)
       .setName(strings.settings.defaultAuthor.name)
       .setDesc(strings.settings.defaultAuthor.desc)
-      .addText((text) =>
-        text
-          .setPlaceholder(strings.settings.defaultAuthor.placeholder)
-          .setValue(this.plugin.settings.defaultAuthor)
-          .onChange(async (value) => {
-            this.plugin.settings.defaultAuthor = value;
-            await this.plugin.saveSettings();
-          }),
-      );
+      .addDropdown((dropdown) => {
+        for (const identity of this.plugin.settings.identities) {
+          dropdown.addOption(identity.id, identity.name);
+        }
+        dropdown.setValue(uiAuthor.id).onChange((value) => {
+          const device = this.plugin.deviceStore.load();
+          device.uiIdentityId = value;
+          this.plugin.deviceStore.save(device);
+        });
+      });
 
     // ── Display ──
     containerEl.createEl("h3", { text: strings.settings.sections.display });
