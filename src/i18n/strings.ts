@@ -22,6 +22,10 @@ export const strings = {
 			enabled: { name: "Enable MCP server", desc: "Serve MCP + the comment watch endpoint from this Obsidian instance" },
 			port: { name: "Port", desc: "Server restarts automatically on change" },
 			host: { name: "Bind host", desc: "127.0.0.1 = this machine only; 0.0.0.0 = reachable from the network (use behind a reverse proxy)" },
+			oauth: {
+				name: "OAuth sign-in",
+				desc: "Lets OAuth-only clients (like claude.ai connectors) connect by pasting an access key once. Off = no OAuth endpoints exist at all.",
+			},
 			keysHeading: "Access keys (this device only)",
 			keysDesc: "Each key pair acts as one identity. The read/write key can use every tool; the poll key can only check for actionable comments.",
 			noKeys: "No keys on this device.",

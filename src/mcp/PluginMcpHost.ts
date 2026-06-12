@@ -14,6 +14,7 @@ import {
 	type KeyRecord,
 	type KeyScope,
 } from "@annotated/comments-core";
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthProvider, NoteAccess } from "./AnnotatedMcpServer";
 
 export const DEFAULT_MCP_PORT = 27191;
@@ -39,6 +40,13 @@ export interface DeviceLocalMcpConfig {
 	 * Decision 4b: the UI-default author is per-device, never synced).
 	 */
 	uiIdentityId?: string;
+	/**
+	 * OAuth gate sub-toggle (PLN — MCP OAuth Shim, D6). Default OFF: no
+	 * metadata endpoints, no authorize page, no discovery surface.
+	 */
+	oauthEnabled?: boolean;
+	/** Dynamically registered OAuth clients (D4) — device-local, no secrets worth syncing. */
+	oauthClients?: OAuthClientInformationFull[];
 }
 
 const DEFAULT_DEVICE_CONFIG: DeviceLocalMcpConfig = {
@@ -99,6 +107,16 @@ export class DeviceLocalStore {
 		}
 		this.save(config);
 		return tokens;
+	}
+
+	loadOAuthClients(): OAuthClientInformationFull[] {
+		return this.load().oauthClients ?? [];
+	}
+
+	saveOAuthClients(clients: OAuthClientInformationFull[]): void {
+		const config = this.load();
+		config.oauthClients = clients;
+		this.save(config);
 	}
 
 	/** Revoke by pairId (both halves) — or a single legacy key by tokenHash. */
@@ -206,4 +224,17 @@ export function resolveBindConfig(device: DeviceLocalMcpConfig): { port: number;
 		port: Number.isFinite(envPort) && envPort > 0 ? envPort : device.port,
 		host: envHost || device.host,
 	};
+}
+
+/** OAuth on/off: env wins (headless container), else the device toggle, default off. */
+export function resolveOAuthEnabled(device: DeviceLocalMcpConfig): boolean {
+	const env = typeof process !== "undefined" ? process.env?.ANNOTATED_MCP_OAUTH : undefined;
+	if (env !== undefined) return env === "1" || env.toLowerCase() === "true";
+	return device.oauthEnabled === true;
+}
+
+/** Public base URL for OAuth metadata (the proxy-facing URL on the container). */
+export function resolvePublicUrl(bind: { host: string; port: number }): string {
+	const env = typeof process !== "undefined" ? process.env?.ANNOTATED_MCP_PUBLIC_URL : undefined;
+	return (env && env.replace(/\/+$/, "")) || `http://${bind.host}:${bind.port}`;
 }

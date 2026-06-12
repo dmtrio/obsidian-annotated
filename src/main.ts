@@ -43,13 +43,15 @@ import {
   setCommentTrackerPositions,
   trackerCallbacks,
 } from "./editor/CommentPositionTracker";
-import { generateIdentityId, type Identity } from "@annotated/comments-core";
+import { authenticate, generateIdentityId, type Identity } from "@annotated/comments-core";
 import {
   buildAuthProvider,
   buildNoteAccess,
   DeviceLocalStore,
   loadEnvKeys,
   resolveBindConfig,
+  resolveOAuthEnabled,
+  resolvePublicUrl,
 } from "./mcp/PluginMcpHost";
 
 export default class AnnotatedPlugin extends Plugin {
@@ -272,18 +274,46 @@ export default class AnnotatedPlugin extends Plugin {
         console.warn(`Annotated: ${warning}`);
         log(`warn: ${warning}`);
       });
+      const auth = buildAuthProvider(getIdentities, this.deviceStore, getEnvKeys);
+      const bind = resolveBindConfig(device);
+
+      // OAuth gate (PLN — MCP OAuth Shim): BUILD_OAUTH is an esbuild define;
+      // in the lite build this whole branch — express, SDK auth router, all
+      // of it — is tree-shaken out of main.js.
+      let oauth: { handler: (req: never, res: never) => void; wwwAuthenticate: string } | undefined;
+      if (BUILD_OAUTH && resolveOAuthEnabled(device)) {
+        const { buildOAuthGate, wwwAuthenticate } = await import("./mcp/OAuthGate");
+        const issuerUrl = resolvePublicUrl(bind);
+        const gate = buildOAuthGate({
+          verifyKey: async (token) => {
+            const result = await authenticate(token, auth.getKeys(), auth.getIdentities());
+            return result.ok
+              ? { identityName: result.identity.name, scope: result.key.scope }
+              : null;
+          },
+          loadClients: () => this.deviceStore.loadOAuthClients(),
+          saveClients: (clients) => this.deviceStore.saveOAuthClients(clients),
+          issuerUrl,
+          serverName: "Obsidian Annotated",
+          onLog: (msg) => log(msg),
+        });
+        oauth = { handler: gate.handler, wwwAuthenticate: wwwAuthenticate(issuerUrl) };
+        await log(`oauth gate enabled (issuer ${issuerUrl})`);
+      }
+
       const server = new AnnotatedMcpServer(
         {
           store: this.commentManager.store,
           notes: buildNoteAccess(this.app.vault),
-          auth: buildAuthProvider(getIdentities, this.deviceStore, getEnvKeys),
+          auth,
           info: {
             vaultName: this.app.vault.getName(),
             pluginVersion: this.manifest.version,
           },
           onLog: (msg) => log(msg),
+          oauth,
         },
-        resolveBindConfig(device),
+        bind,
       );
       await server.start();
       this.mcpServer = server;
@@ -1200,6 +1230,20 @@ class AnnotatedSettingTab extends PluginSettingTab {
           await this.plugin.restartMcpServer();
         }),
       );
+
+    if (BUILD_OAUTH) {
+      new Setting(containerEl)
+        .setName(strings.settings.mcp.oauth.name)
+        .setDesc(strings.settings.mcp.oauth.desc)
+        .addToggle((toggle) =>
+          toggle.setValue(device.oauthEnabled === true).onChange(async (value) => {
+            const config = this.plugin.deviceStore.load();
+            config.oauthEnabled = value;
+            this.plugin.deviceStore.save(config);
+            await this.plugin.restartMcpServer();
+          }),
+        );
+    }
 
     containerEl.createEl("h4", { text: strings.settings.mcp.keysHeading });
     containerEl.createEl("p", {

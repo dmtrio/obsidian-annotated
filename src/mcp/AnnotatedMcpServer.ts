@@ -57,6 +57,15 @@ export interface AnnotatedMcpServerDeps {
 	info: { vaultName: string; pluginVersion: string };
 	/** Optional sink for lifecycle/diagnostic lines (the plugin writes a log file). */
 	onLog?: (message: string) => void;
+	/**
+	 * Optional OAuth gate (PLN — MCP OAuth Shim). When present, the SDK auth
+	 * router handles its paths and 401s advertise discovery via
+	 * WWW-Authenticate. When absent there is no OAuth surface at all.
+	 */
+	oauth?: {
+		handler: (req: IncomingMessage, res: ServerResponse) => void;
+		wwwAuthenticate: string;
+	};
 }
 
 export interface AnnotatedMcpServerConfig {
@@ -116,6 +125,24 @@ export class AnnotatedMcpServer {
 			return this.json(res, 200, { ok: true, pluginVersion: this.deps.info.pluginVersion });
 		}
 
+		// OAuth gate paths (SDK auth router + the paste-key login form).
+		// Only routed when the gate is enabled — otherwise these are 404s
+		// like any other unknown path, and no OAuth surface exists.
+		if (this.deps.oauth) {
+			const p = url.pathname;
+			if (
+				p.startsWith("/.well-known/") ||
+				p.startsWith("/oauth/") ||
+				p === "/authorize" ||
+				p === "/token" ||
+				p === "/register" ||
+				p === "/revoke"
+			) {
+				this.deps.oauth.handler(req, res);
+				return;
+			}
+		}
+
 		const auth = await authenticate(
 			bearerToken(req.headers.authorization),
 			this.deps.auth.getKeys(),
@@ -138,6 +165,11 @@ export class AnnotatedMcpServer {
 	}
 
 	private deny(res: ServerResponse, status: 401 | 403): void {
+		// With the OAuth gate enabled, 401s advertise discovery (RFC 9728) so
+		// OAuth-only clients (claude.ai) can find the authorize flow.
+		if (status === 401 && this.deps.oauth) {
+			res.setHeader("WWW-Authenticate", this.deps.oauth.wwwAuthenticate);
+		}
 		this.json(res, status, { error: status === 401 ? "unauthorized" : "forbidden" });
 	}
 
