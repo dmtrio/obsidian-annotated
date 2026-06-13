@@ -338,6 +338,49 @@ describe("note tools", () => {
 		await client.close();
 	});
 
+	it("append_note adds to the end with a blank-line seam and never overwrites", async () => {
+		const client = await mcpClient("claude-full");
+		const before = notesStore.get("inbox/idea.md");
+
+		const r1 = await callTool(client, "append_note", {
+			path: "inbox/idea.md",
+			content: "## LOG\n\nfirst entry\n",
+		});
+		expect(r1.body.ok).toBe(true);
+		const after1 = notesStore.get("inbox/idea.md")!;
+		// Original content is byte-preserved as a prefix
+		expect(after1.startsWith(before!)).toBe(true);
+		expect(after1).toContain("## LOG");
+		// Exactly one blank line at the seam (no run-on, no pile-up)
+		expect(after1).toContain("the thing.\n\n## LOG");
+
+		// A second append stacks cleanly with one blank line, not three
+		await callTool(client, "append_note", {
+			path: "inbox/idea.md",
+			content: "second entry\n",
+		});
+		const after2 = notesStore.get("inbox/idea.md")!;
+		expect(after2).toContain("first entry\n\nsecond entry");
+
+		// Missing note errors (append modifies, never creates)
+		const missing = await callTool(client, "append_note", {
+			path: "inbox/nope.md",
+			content: "x",
+		});
+		expect(missing.result.isError).toBe(true);
+		await client.close();
+	});
+
+	it("append_note respects the folder fence", async () => {
+		const client = await mcpClient("fenced");
+		const { result } = await callTool(client, "append_note", {
+			path: "inbox/other.md",
+			content: "x",
+		});
+		expect(result.isError).toBe(true);
+		await client.close();
+	});
+
 	it("create_note respects the folder fence", async () => {
 		const client = await mcpClient("fenced");
 		const { result } = await callTool(client, "create_note", {

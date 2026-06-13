@@ -522,6 +522,30 @@ export class AnnotatedMcpServer {
 			},
 		);
 
+		mcp.registerTool(
+			"append_note",
+			{
+				title: "Append to a note",
+				description:
+					"Add text to the end of an existing note without touching any existing content. The safe way to add LOG-style entries — unlike patch_note it needs no match string, and it can never overwrite. Inserts a blank line before the appended text unless the note already ends with one.",
+				inputSchema: {
+					path: z.string(),
+					content: z.string().min(1),
+				},
+			},
+			async ({ path, content }) => {
+				assertPath(path);
+				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+				const existing = await notes.read(path);
+				// Normalize the seam: end the existing body with exactly one newline,
+				// then a blank line, so appended sections don't run into prior text.
+				const base = existing.length === 0 ? "" : existing.replace(/\n*$/, "\n");
+				const sep = base === "" ? "" : "\n";
+				await notes.write(path, base + sep + content);
+				return text({ ok: true, path, appended: content.length });
+			},
+		);
+
 		return mcp;
 	}
 
