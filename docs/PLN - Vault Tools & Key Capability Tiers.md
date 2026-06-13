@@ -8,6 +8,8 @@ repos:
 ---
 # PLN — Vault Tools & Key Capability Tiers
 
+> **Implementation status (2026-06-13): steps 1–5 built on branch `feat/vault-tools-key-tiers` — all 227 tests green, production build clean. Step 6 (live verification) pending deploy.** The new tools run on the branch, but the live MCP still serves v0.1.6, so end-to-end poll/additive/destructive verification against the real vault waits on reloading the plugin from this branch. One deviation from D9: move/delete keep the server thin (`notes.move`/`notes.trash` + cache invalidation) and reuse the existing `vault.on("rename")`/`on("delete")` handlers for sidecar coupling, rather than adding `CommentStore.moveComments` — the MCP server shares `commentManager.store`, so those handlers already keep its cache coherent.
+
 > Close the read/navigation and structural-mutation gaps against a general-purpose vault MCP (the `mcp-obsidian` comparison, 2026-06-13) **without** giving up what makes this server different: identity-bound auth, the folder fence, and a server that imports no `obsidian` (everything through `NoteAccess`). Two coupled deliverables: a small set of new MCP tools (`list_notes`, `search_notes`, `read_multiple_notes`, `move_note`, `delete_note`) and the **capability ladder** that gates them — today's binary `full`/`watch` becomes an ordered `poll → additive → destructive`. The tools and the ladder ship together because the destructive tools must not exist without the tier that gates them.
 
 ---
