@@ -41,6 +41,8 @@ export interface NoteAccess {
 	exists(path: string): Promise<boolean>;
 	read(path: string): Promise<string>;
 	write(path: string, content: string): Promise<void>;
+	/** Create a folder (and intermediates) so create_note can target new subfolders. */
+	mkdir?(path: string): Promise<void>;
 	/** Vault-relative paths of notes that have a comment sidecar. */
 	listCommentedNotePaths(): Promise<string[]>;
 }
@@ -488,6 +490,35 @@ export class AnnotatedMcpServer {
 					: content.replace(oldString, newString);
 				await notes.write(path, updated);
 				return text({ ok: true, replacements: occurrences });
+			},
+		);
+
+		mcp.registerTool(
+			"create_note",
+			{
+				title: "Create a note",
+				description:
+					"Create a new markdown note with the given content. Fails if the note already exists — use patch_note to modify existing notes.",
+				inputSchema: {
+					path: z.string().describe("Vault-relative path ending in .md"),
+					content: z.string(),
+				},
+			},
+			async ({ path, content }) => {
+				assertPath(path);
+				// Creation is the only tool that can conjure arbitrary files; keep it
+				// to in-vault markdown (no sidecars, no .obsidian, no traversal).
+				if (!path.endsWith(".md")) throw new Error("path must end in .md");
+				if (path.startsWith("/") || path.split("/").some((s) => s === "..")) {
+					throw new Error(`Invalid path: ${path}`);
+				}
+				if (await notes.exists(path)) {
+					throw new Error(`Note already exists: ${path} — use patch_note to modify it`);
+				}
+				const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+				if (parent && notes.mkdir && !(await notes.exists(parent))) await notes.mkdir(parent);
+				await notes.write(path, content);
+				return text({ ok: true, path });
 			},
 		);
 

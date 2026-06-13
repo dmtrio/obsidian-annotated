@@ -39,6 +39,7 @@ function buildNotes(): NoteAccess {
 			return c;
 		},
 		write: async (p, content) => void notesStore.set(p, content),
+		mkdir: async () => {},
 		listCommentedNotePaths: async () => {
 			const suffix = ".comments.json";
 			return [...storage.files.keys()]
@@ -305,6 +306,46 @@ describe("note tools", () => {
 			newString: "x",
 		});
 		expect(result.isError).toBe(true);
+		await client.close();
+	});
+
+	it("create_note creates a new markdown note (with parent folder) and nothing else", async () => {
+		const client = await mcpClient("claude-full");
+		const created = await callTool(client, "create_note", {
+			path: "plans/PLN - New Thing.md",
+			content: "---\nstatus: draft\n---\n# PLN\n",
+		});
+		expect(created.body).toEqual({ ok: true, path: "plans/PLN - New Thing.md" });
+		expect(notesStore.get("plans/PLN - New Thing.md")).toContain("status: draft");
+
+		// Never overwrites — existing notes are patch_note territory
+		const dup = await callTool(client, "create_note", { path: "inbox/idea.md", content: "x" });
+		expect(dup.result.isError).toBe(true);
+		expect(notesStore.get("inbox/idea.md")).toContain("# Idea");
+
+		// Markdown only — no sidecars, configs, or traversal
+		const sidecar = await callTool(client, "create_note", {
+			path: "inbox/x.comments.json",
+			content: "{}",
+		});
+		expect(sidecar.result.isError).toBe(true);
+		const traversal = await callTool(client, "create_note", {
+			path: "../outside.md",
+			content: "x",
+		});
+		expect(traversal.result.isError).toBe(true);
+
+		await client.close();
+	});
+
+	it("create_note respects the folder fence", async () => {
+		const client = await mcpClient("fenced");
+		const { result } = await callTool(client, "create_note", {
+			path: "inbox/new.md",
+			content: "x",
+		});
+		expect(result.isError).toBe(true);
+		expect(notesStore.has("inbox/new.md")).toBe(false);
 		await client.close();
 	});
 });

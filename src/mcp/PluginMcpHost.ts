@@ -207,6 +207,7 @@ export function buildNoteAccess(vault: Vault): NoteAccess {
 		exists: (path) => vault.adapter.exists(path),
 		read: (path) => vault.adapter.read(path),
 		write: (path, content) => vault.adapter.write(path, content),
+		mkdir: (path) => vault.adapter.mkdir(path),
 		listCommentedNotePaths: async () => {
 			const suffix = ".comments.json";
 			return vault
