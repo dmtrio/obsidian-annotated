@@ -10,6 +10,7 @@
 import { App, Vault } from "obsidian";
 import {
 	hashToken,
+	readFrontmatter,
 	type Identity,
 	type KeyRecord,
 	type KeyScope,
@@ -214,6 +215,24 @@ export function buildNoteAccess(vault: Vault): NoteAccess {
 				.getFiles()
 				.filter((f) => f.path.endsWith(suffix))
 				.map((f) => f.path.slice(0, -suffix.length));
+		},
+		listFrontmatter: async () => {
+			// TODO: metadataCache would be the cheaper source instead of reading files
+			const result = [];
+			for (const file of vault.getFiles()) {
+				if (!file.path.endsWith(".md")) continue;
+				try {
+					const content = await vault.adapter.read(file.path);
+					const parsed = readFrontmatter(content);
+					result.push({
+						path: file.path,
+						frontmatter: parsed.scalars,
+					});
+				} catch {
+					// Skip unreadable files
+				}
+			}
+			return result;
 		},
 	};
 }

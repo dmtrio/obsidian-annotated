@@ -44,3 +44,8 @@ export {
 	type FrontmatterEdit,
 	type FrontmatterRead,
 } from "./frontmatter";
+export {
+	queryActionableFrontmatter,
+	type FrontmatterQueryParams,
+	type FrontmatterRef,
+} from "./actionableFrontmatter";

@@ -25,6 +25,7 @@ import {
 	keyAllowsPath,
 	pathInScope,
 	queryActionable,
+	queryActionableFrontmatter,
 	resolveQueryScope,
 	applyFrontmatterEdit,
 	stampProvenance,
@@ -47,6 +48,8 @@ export interface NoteAccess {
 	mkdir?(path: string): Promise<void>;
 	/** Vault-relative paths of notes that have a comment sidecar. */
 	listCommentedNotePaths(): Promise<string[]>;
+	/** All notes' frontmatter (scalars only) for the frontmatter watch surface. Optional — absent ⇒ the surface returns []. */
+	listFrontmatter?(): Promise<Array<{ path: string; frontmatter: Record<string, string> }>>;
 }
 
 export interface AuthProvider {
@@ -191,6 +194,12 @@ export class AnnotatedMcpServer {
 			return this.handleActionable(url, auth.identity, auth.key, res);
 		}
 
+		if (url.pathname === "/frontmatter/actionable" && req.method === "GET") {
+			const status = authHttpStatus(auth, "actionable");
+			if (status !== 200 || !auth.ok) return this.deny(res, status);
+			return this.handleFrontmatterActionable(url, auth.identity, auth.key, res);
+		}
+
 		if (url.pathname === "/mcp") {
 			const status = authHttpStatus(auth, "mcp");
 			if (status !== 200 || !auth.ok) return this.deny(res, status);
@@ -255,6 +264,46 @@ export class AnnotatedMcpServer {
 		return files;
 	}
 
+	private async handleFrontmatterActionable(
+		url: URL,
+		identity: Identity,
+		key: KeyRecord,
+		res: ServerResponse,
+	): Promise<void> {
+		// If listFrontmatter is not implemented, return empty
+		if (!this.deps.notes.listFrontmatter) {
+			return this.json(res, 200, []);
+		}
+
+		// Resolve scope against the key's fence
+		const scope = resolveQueryScope(url.searchParams.get("scope") ?? undefined, key);
+		if (!scope.ok) {
+			return this.json(res, 403, { error: "scope outside this key's folder fence" });
+		}
+
+		// Parse params from query string
+		const field = url.searchParams.get("field") ?? undefined;
+		const triggersParam = url.searchParams.get("triggers");
+		const triggers = triggersParam
+			? triggersParam.split(",").filter((t) => t.length > 0)
+			: undefined;
+		const sep = url.searchParams.get("sep") ?? undefined;
+
+		// Load notes and filter to allowed paths
+		const allNotes = await this.deps.notes.listFrontmatter();
+		const filteredNotes = allNotes.filter((note) => keyAllowsPath(key, note.path));
+
+		// Run the query
+		const refs = queryActionableFrontmatter(filteredNotes, {
+			field,
+			triggers,
+			scope: scope.scopes,
+			sep,
+		});
+
+		this.json(res, 200, refs);
+	}
+
 	// ── MCP surface ─────────────────────────────────────────────
 
 	private async handleMcp(
@@ -312,6 +361,35 @@ export class AnnotatedMcpServer {
 						status,
 					}),
 				);
+			},
+		);
+
+		mcp.registerTool(
+			"check_frontmatter",
+			{
+				title: "Check for actionable frontmatter",
+				description:
+					"Non-blocking scan for notes whose frontmatter field (default 'annotated') holds a trigger value — the note-level analog of check_comments. Returns {note_path, field, value, root, arg}.",
+				inputSchema: {
+					field: z.string().optional(),
+					triggers: z.array(z.string()).optional(),
+					path: z.string().optional().describe("Folder or note path scope (default: whole vault)"),
+					sep: z.string().optional(),
+				},
+			},
+			async ({ field, triggers, path, sep }) => {
+				if (!notes.listFrontmatter) return text([]);
+				const scope = resolveQueryScope(path, key);
+				if (!scope.ok) throw new Error(`Scope is outside this key's folder fence: ${path}`);
+				const allNotes = await notes.listFrontmatter();
+				const filteredNotes = allNotes.filter((note) => keyAllowsPath(key, note.path));
+				const refs = queryActionableFrontmatter(filteredNotes, {
+					field,
+					triggers,
+					scope: scope.scopes,
+					sep,
+				});
+				return text(refs);
 			},
 		);
 

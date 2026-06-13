@@ -11,6 +11,7 @@ import {
 	CommentStore,
 	InMemoryStorageAdapter,
 	hashToken,
+	readFrontmatter,
 	type Identity,
 	type KeyRecord,
 } from "@annotated/comments-core";
@@ -45,6 +46,18 @@ function buildNotes(): NoteAccess {
 			return [...storage.files.keys()]
 				.filter((p) => p.endsWith(suffix))
 				.map((p) => p.slice(0, -suffix.length));
+		},
+		listFrontmatter: async () => {
+			const result = [];
+			for (const [path, content] of notesStore) {
+				if (!path.endsWith(".md")) continue;
+				const parsed = readFrontmatter(content);
+				result.push({
+					path,
+					frontmatter: parsed.scalars,
+				});
+			}
+			return result;
 		},
 	};
 }
@@ -256,6 +269,82 @@ describe("folder fence enforcement", () => {
 			headers: { Authorization: "Bearer fenced" },
 		});
 		expect(res.status).toBe(403);
+	});
+});
+
+describe("frontmatter watch surface", () => {
+	it("GET /frontmatter/actionable with watch key returns refs matching trigger", async () => {
+		// Seed notes with frontmatter
+		notesStore.set("watch/a.md", "---\nannotated: review\n---\n# A\n");
+		notesStore.set("watch/b.md", "---\nannotated: reviewed\n---\n# B\n");
+
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch&triggers=review`, {
+			headers: { Authorization: "Bearer claude-watch" },
+		});
+		expect(res.status).toBe(200);
+		const refs = await res.json();
+		expect(refs).toHaveLength(1);
+		expect(refs[0]).toEqual({
+			note_path: "watch/a.md",
+			field: "annotated",
+			value: "review",
+			root: "review",
+			arg: null,
+		});
+	});
+
+	it("check_frontmatter MCP tool with triggers and scope", async () => {
+		notesStore.set("watch/c.md", "---\nannotated: review\n---\n# C\n");
+
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "check_frontmatter", {
+			triggers: ["review"],
+			path: "watch",
+		});
+		expect(body).toHaveLength(2);
+		expect(body[0].note_path).toBe("watch/a.md");
+		expect(body[1].note_path).toBe("watch/c.md");
+		await client.close();
+	});
+
+	it("compound frontmatter value with arg", async () => {
+		notesStore.set("watch/d.md", "---\nannotated: translate/spanish\n---\n# D\n");
+
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch&triggers=translate`, {
+			headers: { Authorization: "Bearer claude-watch" },
+		});
+		const refs = await res.json();
+		expect(refs).toHaveLength(1);
+		expect(refs[0]).toEqual({
+			note_path: "watch/d.md",
+			field: "annotated",
+			value: "translate/spanish",
+			root: "translate",
+			arg: "spanish",
+		});
+	});
+
+	it("fenced key requesting out-of-fence scope is refused", async () => {
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch`, {
+			headers: { Authorization: "Bearer fenced" },
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("watch key accessing mcp surface is forbidden", async () => {
+		const client = new Client({ name: "test-client", version: "0.0.0" });
+		let err: Error | null = null;
+		try {
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
+					requestInit: { headers: { Authorization: "Bearer claude-watch" } },
+				}),
+			);
+		} catch (e) {
+			err = e as Error;
+		}
+		expect(err).toBeTruthy();
+		client.close();
 	});
 });
 
