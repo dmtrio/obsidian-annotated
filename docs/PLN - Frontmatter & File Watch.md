@@ -38,10 +38,11 @@ The result is a clean **two-channel model**:
 
     **Schema** (per file):
     ```yaml
-    # actions/summarize.yml  — filename "summarize" IS the trigger value
-    completedTag: summarized   # omit → past-tense of the action; set → exact receipt
+    # actions/summarize.yml  — filename "summarize" IS the trigger root
+    completedTag: summarized   # omit → past-tense of the action; set → exact receipt ({arg} allowed)
     clearedBy: agent           # agent = request (default) | human = mode (e.g. active.yml: no completedTag, human clears)
-    do: |
+    output: sibling            # sibling | section | comment | none(default) — the WRITE MECHANISM (see D2b)
+    do: |                      # the CONTENT; {arg} interpolates a compound value's param (D2a)
       Read the note, write a concise summary to a sibling "<name> (summary).md",
       then set the completedTag.
     ```
@@ -56,6 +57,13 @@ The result is a clean **two-channel model**:
   - **Modes** (adjective — *human* clears; a standing state, not an event): `annotated: active` = keep this note in working context while watching this scope. Announced once when it appears, then it modulates behavior rather than generating repeat events.
   - **Failure** (`annotated: blocked`): the agent couldn't fulfill a request (ambiguous value, missing capability, work that needs a human). It writes `blocked` **and** leaves a comment explaining — frontmatter carries the state, the comment thread carries the conversation.
   - The receipt-is-past-tense convention means most new verbs need no registration: `translate → translated` is derivable mechanically. Only modes (human-cleared, can't be guessed from grammar) and failure states need to be listed. A value is **unknown** when it is *neither* a recognizable imperative-verb request *nor* a listed mode/failure — e.g. `annotated: urgent` (an adjective, so not a derivable request; and absent from the skill's mode list). Unknown values are **not** guessed — the agent writes `blocked` + a comment naming the unrecognized value, never inventing an action for it.
+
+- **D2a — Parameterized actions are a compound scalar, matched by root.** An action value may be `<root>` or `<root><sep><arg>` (`annotated: translate/spanish`). It stays a single frontmatter string — no nested YAML in the note — so `update_frontmatter` and the watch query stay simple. The script/agent resolves the action by its **root** (`translate` → `actions/translate.yml`) and passes `<arg>` (`spanish`) to `do:` via `{arg}`. The receipt carries the arg too (`completedTag: "translated/{arg}"`, default `<pasttense>/{arg}`), so `translate/spanish` and `translate/french` are distinct values — both announce, both leave distinct receipts — and the echo-guard holds because the receipt root (`translated`) differs from the trigger root (`translate`).
+  - **Separator must be outside the action-filename namespace** so action-names and args can't collide. `/` is chosen over `-`: `review/deep` is unambiguously `review`+arg, while `review-deep.yml` is unambiguously its own action; a hyphen separator makes `review-deep` ambiguous.
+  - **Server impact is one character of convention, not semantics.** The actionable query matches a note when its value's root ∈ `triggers`, so the endpoint takes a `sep=/` param and root-matches; D1 (value-agnostic server) substantially holds — the server still doesn't know what any action *means*.
+  - This **resolves the former "param-carrying requests" open question** — answered here, not deferred.
+
+- **D2b — `output` is the write mechanism; `do:` is the content.** An optional per-action key naming where a result lands: `sibling` (a managed companion note), `section` (a managed heading block in the same note), `comment` (a thread), or `none` (default — the work is its own side effect, e.g. `review` leaves comments). It's structured rather than prose because it **drives tool choice and re-run idempotency**: a managed `sibling`/`section` must be *replaced* on re-run, but `create_note` refuses overwrite by design — so a managed target is "create-if-absent-else-patch-body", a mechanic the runner can only apply consistently if the action declares it. `do:` still carries naming and content specifics; `output` just picks the lane (`create_note` / `append_note` / `patch_note` / `reply_to_comment`) and the overwrite semantics.
 
 - **D3 — Echo-loop prevention (the frontmatter analog of the comment self-exclusion).** The agent writes receipts, and a naive watcher would see its own `reviewed` write as a fresh event. Two composable guards, mirroring how the comment watcher excludes its own identity:
   - **An explicit trigger allowlist** on the watch surface (`triggers=review,summarize,active,...`), derived by the skill from the action files (D1a) and handed to the monitor at arm time — the watcher announces only listed values, so the agent's own receipt writes (which are `completedTag` values, never trigger names) fall outside it. This supersedes the earlier "announce only non-past-tense" heuristic: with explicit `completedTag`s the exclude-set is exact, not inferred.
@@ -77,7 +85,7 @@ The result is a clean **two-channel model**:
 
 1. **`update_frontmatter` tool (plugin server).** Field-addressed set/clear per D4; round-trips unknown fields and body; zod-validated like the other tools; fence-checked. Decide `processFrontMatter` vs. YAML splice here. *Accept: unit tests — set a new field, change an existing one, clear one, all with unknown sibling fields + body preserved byte-for-byte; fence rejection; covered over HTTP.*
 
-2. **Frontmatter actionable query (comments-core + endpoint + tool).** `queryActionableFrontmatter(notes, {scope, field, triggers})` returning `{ note_path, field, value, ... }`, oldest-first, fence-clamped, value-agnostic. Wire `GET /frontmatter/actionable` + `check_frontmatter` MCP tool (D5 option a). Source frontmatter from `metadataCache` on the plugin host; from file parse on the stdio host. *Accept: query unit tests (trigger filter, scope clamp, fence refusal); HTTP auth matrix reuses the comment-watch tests' shape.*
+2. **Frontmatter actionable query (comments-core + endpoint + tool).** `queryActionableFrontmatter(notes, {scope, field, triggers, sep})` returning `{ note_path, field, value, root, arg, ... }`, oldest-first, fence-clamped, value-agnostic. Matches when the value's **root** (before `sep`, default `/`) ∈ `triggers` (D2a), so compound `translate/spanish` values match `triggers=translate`. Wire `GET /frontmatter/actionable` + `check_frontmatter` MCP tool (D5 option a). Source frontmatter from `metadataCache` on the plugin host; from file parse on the stdio host. *Accept: query unit tests (root match on compound + plain values, trigger filter, scope clamp, fence refusal); HTTP auth matrix reuses the comment-watch tests' shape.*
 
 3. **Monitor: frontmatter channel.** Extend `watch-comments.sh` (or a sibling `watch-frontmatter.sh`) to poll the new surface with `triggers=`, ledger key `path + hash(value)`, one debounced line per note: `frontmatter <field>=<value> on <note_path>`. Echo-guard per D3 verified by test (agent's receipt write produces no event). *Accept: fixture-harness checks mirroring the comment monitor's 6-check suite; shellcheck-clean.*
 
@@ -87,8 +95,8 @@ The result is a clean **two-channel model**:
 
 ## Open questions (for ratification / surfacing during build)
 
-- **Where does a `summarize` receipt's summary land?** Sibling note (`<name> (summary).md` via `create_note` — now possible), a `## Summary` section appended to the note (`append_note`), or a comment. Likely per-value config in the skill, not a global rule.
-- **Param-carrying requests** (`summarize: 200w`, `translate: fr`)? Deferred — keep values enum-simple for v1; the grammar can grow to `verb: arg` later without breaking the convention.
+- **Where does a `summarize` receipt's summary land?** Now an `output:` value per action (D2b: `sibling`/`section`/`comment`), with `do:` carrying the naming. Remaining sub-question: the default naming convention for `sibling`/`section` targets (e.g. `<name> (summary).md`, `## Summary`) so re-runs find and replace the same target.
+- **~~Param-carrying requests~~** — *resolved* by D2a (compound `<root>/<arg>` values). Remaining sub-question: ratify `/` as the separator.
 - **`active` consumption cost** — the D6 cap's exact shape (count vs. token budget) waits for a real context-pressure observation.
 - **Unify the two actionable surfaces (D5b)?** Revisit after both channels are proven.
 
