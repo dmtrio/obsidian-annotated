@@ -1,14 +1,20 @@
-# proofread.yml — shows two things: an irregular past tense, and section output.
+# proofread.yml — the pathological verb, and why `completedTag` is mandatory here.
 #
 # Triggered by:  annotated: proofread
-# Cleared by:    the agent writing  annotated: proofread   (already past tense!)
+# Cleared by:    the agent writing  annotated: proofed
 #
-# "proofread" is its own past tense, so the past-tense default would mis-derive
-# "proofreaded" — declaring `completedTag` explicitly is exactly what that's for.
+# THE TRAP: "proofread" is its own past tense. The default receipt derivation
+# would give the ungrammatical "proofreaded", and the *correct* past tense
+# ("proofread") would COLLIDE with the trigger — a receipt equal to its trigger
+# is indistinguishable from "not started", so the note can never read as done and
+# a fresh-ledger scan would re-run it forever. The invariant (D3): a completedTag
+# must differ from every trigger root. So this action declares a distinct receipt
+# explicitly — "proofed". Any verb whose natural past tense equals its present
+# must do the same.
 #
 # output: section → a MANAGED heading block in the SAME note. Re-running finds the
 # block by its heading and replaces it; it never duplicates or appends a second.
-completedTag: proofread
+completedTag: proofed
 clearedBy: agent
 output: section
 do: |

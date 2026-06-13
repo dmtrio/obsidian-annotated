@@ -14,10 +14,14 @@ never parses YAML.
 - **`do:`** — instructions for the agent when a note carries this action. `{arg}`
   interpolates the part after `/`; it may be a comma list (`spanish,french`).
 - **`completedTag`** — the receipt the agent writes when done. Omit it to default
-  to the filename's past tense (`review` → `reviewed`); declare it for irregular
-  verbs (`proofread` → `proofread`) or to template the arg (`translated/{arg}`).
-  Every `completedTag` is excluded from the trigger set, so the agent's own
-  receipt writes never echo back as new events.
+  to the filename's past tense (`review` → `reviewed`); declare it to template the
+  arg (`translated/{arg}`) or when the default collides. **A receipt must differ
+  from every trigger root** — otherwise "done" and "requested" are the same string
+  (re-runs forever, no visible done-state). The past-tense default guarantees this
+  except for verbs whose past tense equals their present (`proofread`), which must
+  declare a distinct receipt (`proofed`) and are validated at load. Every
+  `completedTag` is excluded from the trigger set, so the agent's own receipt
+  writes never echo back as new events.
 - **`clearedBy`** — `agent` (a request: the agent writes the receipt) or `human`
   (a mode: the human removes the field). Having a `completedTag` already implies
   `agent`; modes have none.
@@ -38,7 +42,7 @@ value. It is not a user file.
 | `summarize.yml` | request | `output: sibling`, a managed artifact note |
 | `translate.yml` | request | `{arg}` params, comma-list fan-out, templated receipt |
 | `active.yml` | mode | human-cleared, no `completedTag` |
-| `proofread.yml` | request | explicit irregular past tense, `output: section` |
+| `proofread.yml` | request | collision-forced distinct receipt (D3 invariant), `output: section` |
 
 Add a workflow by dropping in one more `<name>.yml`. Remove one by deleting its
 file. Neither touches `SKILL.md`.
