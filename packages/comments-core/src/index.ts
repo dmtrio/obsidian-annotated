@@ -37,3 +37,9 @@ export {
 	type ScopeResolution,
 	type Surface,
 } from "./auth";
+export {
+	readFrontmatter,
+	applyFrontmatterEdit,
+	type FrontmatterEdit,
+	type FrontmatterRead,
+} from "./frontmatter";
