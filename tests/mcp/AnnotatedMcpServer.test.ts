@@ -123,7 +123,6 @@ describe("HTTP auth matrix", () => {
 		["/comments/actionable", "claude-watch", 200],
 		["/comments/actionable", "claude-full", 200],
 		["/mcp", null, 401],
-		["/mcp", "claude-watch", 403],
 	];
 	for (const [path, token, expected] of cases) {
 		it(`GET ${path} with ${token ?? "no key"} → ${expected}`, async () => {
@@ -149,12 +148,63 @@ describe("get_config", () => {
 		expect(result.body).toEqual({ tagPrefix: "bot/" });
 		await client.close();
 	});
+});
 
-	it("watch scope cannot access /mcp (returns 403)", async () => {
-		const res = await fetch(`${BASE}/mcp`, {
-			headers: { Authorization: "Bearer claude-watch" },
+describe("tier-gated tool registration", () => {
+	it("poll tier client can access read tools but not write tools", async () => {
+		const client = await mcpClient("claude-watch");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+
+		// Poll tier tools should be present
+		expect(toolNames).toContain("read_note");
+		expect(toolNames).toContain("read_comments");
+		expect(toolNames).toContain("check_comments");
+		expect(toolNames).toContain("check_frontmatter");
+		expect(toolNames).toContain("list_commented_notes");
+
+		// Additive tier tools should NOT be present
+		expect(toolNames).not.toContain("add_comment");
+		expect(toolNames).not.toContain("patch_note");
+		expect(toolNames).not.toContain("create_note");
+		expect(toolNames).not.toContain("append_note");
+		expect(toolNames).not.toContain("update_frontmatter");
+		expect(toolNames).not.toContain("reply_to_comment");
+		expect(toolNames).not.toContain("resolve_comment");
+
+		await client.close();
+	});
+
+	it("additive tier client can access read and write tools", async () => {
+		const client = await mcpClient("claude-full");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+
+		// Poll tier tools should be present
+		expect(toolNames).toContain("read_note");
+		expect(toolNames).toContain("read_comments");
+		expect(toolNames).toContain("check_comments");
+
+		// Additive tier tools should be present
+		expect(toolNames).toContain("add_comment");
+		expect(toolNames).toContain("patch_note");
+		expect(toolNames).toContain("create_note");
+		expect(toolNames).toContain("append_note");
+		expect(toolNames).toContain("update_frontmatter");
+		expect(toolNames).toContain("reply_to_comment");
+		expect(toolNames).toContain("resolve_comment");
+
+		await client.close();
+	});
+
+	it("calling a write tool with a poll client returns an error", async () => {
+		const client = await mcpClient("claude-watch");
+		const result = await client.callTool({
+			name: "add_comment",
+			arguments: { path: "inbox/idea.md", content: "x", startLine: 1, endLine: 1 },
 		});
-		expect(res.status).toBe(403);
+		expect(result.isError).toBe(true);
+		await client.close();
 	});
 });
 
@@ -348,21 +398,6 @@ describe("frontmatter watch surface", () => {
 		expect(res.status).toBe(403);
 	});
 
-	it("watch key accessing mcp surface is forbidden", async () => {
-		const client = new Client({ name: "test-client", version: "0.0.0" });
-		let err: Error | null = null;
-		try {
-			await client.connect(
-				new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
-					requestInit: { headers: { Authorization: "Bearer claude-watch" } },
-				}),
-			);
-		} catch (e) {
-			err = e as Error;
-		}
-		expect(err).toBeTruthy();
-		client.close();
-	});
 });
 
 describe("note tools", () => {

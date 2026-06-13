@@ -7,7 +7,28 @@
 
 import { pathInScope } from "./actionableQuery";
 
-export type KeyScope = "full" | "watch";
+export type KeyScope = "poll" | "additive" | "destructive" | "full" | "watch";
+
+export type Tier = "poll" | "additive" | "destructive";
+
+export const TIER_ORDER: Record<Tier, number> = { poll: 0, additive: 1, destructive: 2 };
+
+/** Map any stored/legacy scope string to a capability tier. Unknown ⇒ poll (safest floor). */
+export function normalizeScope(raw: string): Tier {
+	switch (raw) {
+		case "destructive": return "destructive";
+		case "additive":
+		case "full": return "additive";
+		case "poll":
+		case "watch": return "poll";
+		default: return "poll";
+	}
+}
+
+/** Does this stored scope grant at least `minTier`? */
+export function tierAllows(scope: string, minTier: Tier): boolean {
+	return TIER_ORDER[normalizeScope(scope)] >= TIER_ORDER[minTier];
+}
 
 export interface Identity {
 	/** Random, immutable. Concurrent creation on synced replicas can't collide. */
@@ -100,9 +121,9 @@ export async function authenticate(
 	return { ok: true, key: matched, identity };
 }
 
-/** full → everything; watch → the actionable route only. */
-export function canAccess(scope: KeyScope, surface: Surface): boolean {
-	return scope === "full" || surface === "actionable";
+/** Every authenticated tier (>= poll) may reach both HTTP surfaces; MCP tools are gated individually by minTier at registration. */
+export function canAccess(_scope: KeyScope, _surface: Surface): boolean {
+	return true;
 }
 
 /**

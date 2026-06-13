@@ -27,8 +27,11 @@ export {
 	generateIdentityId,
 	hashToken,
 	keyAllowsPath,
+	normalizeScope,
 	resolveQueryScope,
+	tierAllows,
 	timingSafeEqualHex,
+	TIER_ORDER,
 	type AuthFailureReason,
 	type AuthResult,
 	type Identity,
@@ -36,6 +39,7 @@ export {
 	type KeyScope,
 	type ScopeResolution,
 	type Surface,
+	type Tier,
 } from "./auth";
 export {
 	readFrontmatter,

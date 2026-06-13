@@ -12,9 +12,11 @@ import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/serv
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import type { KeyScope } from "@annotated/comments-core";
+
 export interface VerifiedKey {
 	identityName: string;
-	scope: "full" | "watch";
+	scope: KeyScope;
 }
 
 export interface OAuthGateDeps {

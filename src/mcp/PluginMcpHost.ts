@@ -161,8 +161,8 @@ export async function loadEnvKeys(
 		pathScope?: string[];
 	}> = [];
 	for (const [i, entry] of entries.entries()) {
-		if (!entry?.token || !entry.identity || (entry.scope !== "full" && entry.scope !== "watch")) {
-			onWarn(`ANNOTATED_MCP_KEYS[${i}] needs token, identity, scope full|watch — skipped`);
+		if (!entry?.token || !entry.identity || !["full", "watch", "poll", "additive", "destructive"].includes(entry.scope as string)) {
+			onWarn(`ANNOTATED_MCP_KEYS[${i}] needs token, identity, scope poll|additive|destructive|full|watch — skipped`);
 			continue;
 		}
 		hashed.push({

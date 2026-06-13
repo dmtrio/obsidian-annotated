@@ -8,7 +8,9 @@ import {
 	generateIdentityId,
 	hashToken,
 	keyAllowsPath,
+	normalizeScope,
 	resolveQueryScope,
+	tierAllows,
 	timingSafeEqualHex,
 	AuthResult,
 	Identity,
@@ -104,18 +106,18 @@ describe("authenticate", () => {
 	});
 });
 
-describe("authorization matrix (the rejection matrix)", () => {
+describe("authorization matrix (every authenticated tier reaches both surfaces)", () => {
 	it("full key: all surfaces", () => {
 		expect(canAccess("full", "mcp")).toBe(true);
 		expect(canAccess("full", "actionable")).toBe(true);
 	});
 
-	it("watch key: actionable only", () => {
+	it("watch key: all surfaces (tool gating is separate)", () => {
 		expect(canAccess("watch", "actionable")).toBe(true);
-		expect(canAccess("watch", "mcp")).toBe(false);
+		expect(canAccess("watch", "mcp")).toBe(true);
 	});
 
-	it("maps to HTTP statuses: 401 bad/missing/orphaned, 403 watch-on-mcp, 200 otherwise", async () => {
+	it("maps to HTTP statuses: 401 bad/missing/orphaned, 200 for all authenticated tiers", async () => {
 		const { fullKey, watchKey, orphanKey } = await makeKeys();
 		const keys = [fullKey, watchKey, orphanKey];
 
@@ -123,7 +125,7 @@ describe("authorization matrix (the rejection matrix)", () => {
 			[null, "mcp", 401],
 			["wrong", "mcp", 401],
 			["orphan-token", "mcp", 401],
-			["watch-token", "mcp", 403],
+			["watch-token", "mcp", 200],
 			["watch-token", "actionable", 200],
 			["full-token", "mcp", 200],
 			["full-token", "actionable", 200],
@@ -192,5 +194,46 @@ describe("effectiveExcludeAuthors", () => {
 
 	it("an explicit list overrides the default", () => {
 		expect(effectiveExcludeAuthors(["Deme", "bot"], claude)).toEqual(["Deme", "bot"]);
+	});
+});
+
+describe("scope normalization + tiers", () => {
+	it("normalizeScope maps legacy and new scopes to tiers", () => {
+		expect(normalizeScope("full")).toBe("additive");
+		expect(normalizeScope("watch")).toBe("poll");
+		expect(normalizeScope("poll")).toBe("poll");
+		expect(normalizeScope("additive")).toBe("additive");
+		expect(normalizeScope("destructive")).toBe("destructive");
+		expect(normalizeScope("bogus")).toBe("poll");
+	});
+
+	it("tierAllows: poll allows poll but not additive/destructive", () => {
+		expect(tierAllows("poll", "poll")).toBe(true);
+		expect(tierAllows("poll", "additive")).toBe(false);
+		expect(tierAllows("poll", "destructive")).toBe(false);
+	});
+
+	it("tierAllows: additive allows poll and additive but not destructive", () => {
+		expect(tierAllows("additive", "poll")).toBe(true);
+		expect(tierAllows("additive", "additive")).toBe(true);
+		expect(tierAllows("additive", "destructive")).toBe(false);
+	});
+
+	it("tierAllows: destructive allows all three tiers", () => {
+		expect(tierAllows("destructive", "poll")).toBe(true);
+		expect(tierAllows("destructive", "additive")).toBe(true);
+		expect(tierAllows("destructive", "destructive")).toBe(true);
+	});
+
+	it("tierAllows: legacy full allows additive (not destructive)", () => {
+		expect(tierAllows("full", "poll")).toBe(true);
+		expect(tierAllows("full", "additive")).toBe(true);
+		expect(tierAllows("full", "destructive")).toBe(false);
+	});
+
+	it("tierAllows: legacy watch allows only poll", () => {
+		expect(tierAllows("watch", "poll")).toBe(true);
+		expect(tierAllows("watch", "additive")).toBe(false);
+		expect(tierAllows("watch", "destructive")).toBe(false);
 	});
 });
