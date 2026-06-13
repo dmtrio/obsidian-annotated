@@ -337,7 +337,7 @@ export default class AnnotatedPlugin extends Plugin {
       const server = new AnnotatedMcpServer(
         {
           store: this.commentManager.store,
-          notes: buildNoteAccess(this.app.vault),
+          notes: buildNoteAccess(this.app),
           auth,
           info: {
             vaultName: this.app.vault.getName(),

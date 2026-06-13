@@ -63,6 +63,10 @@ export interface NoteAccess {
 	listFrontmatter?(): Promise<Array<{ path: string; frontmatter: Record<string, string> }>>;
 	/** Full-text search over notes. Optional — absent ⇒ search_notes returns []. `scopes` (undefined = whole vault) pre-filters; the server still fences results. */
 	search?(query: string, scopes: string[] | undefined, opts?: { limit?: number }): Promise<SearchHit[]>;
+	/** Move/rename a note AND its comment sidecar, rewriting backlinks. Optional — absent ⇒ move_note unsupported. */
+	move?(oldPath: string, newPath: string): Promise<void>;
+	/** Send a vault path to trash (recoverable). Optional — absent ⇒ delete_note unsupported. */
+	trash?(path: string): Promise<void>;
 }
 
 export interface AuthProvider {
@@ -875,6 +879,58 @@ export class AnnotatedMcpServer {
 						: updated;
 					await notes.write(path, toWrite);
 					return text({ ok: true, path, appended: content.length });
+				},
+			);
+		}
+
+		if (allow("destructive")) {
+			mcp.registerTool(
+				"move_note",
+				{
+					title: "Move or rename a note",
+					description:
+						"Relocate a note to a new path, rewriting backlinks. Its comment sidecar follows. Fails if the destination already exists.",
+					inputSchema: {
+						path: z.string(),
+						newPath: z.string().describe("Vault-relative destination ending in .md"),
+					},
+				},
+				async ({ path, newPath }) => {
+					assertPath(path);
+					assertPath(newPath);
+					if (!newPath.endsWith(".md")) throw new Error("newPath must end in .md");
+					if (newPath.startsWith("/") || newPath.split("/").some((s) => s === "..")) {
+						throw new Error(`Invalid path: ${newPath}`);
+					}
+					if (!notes.move) throw new Error("move is not supported on this host");
+					if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+					if (await notes.exists(newPath)) throw new Error(`Destination already exists: ${newPath}`);
+					await notes.move(path, newPath);
+					store.invalidateCache(path);
+					store.invalidateCache(newPath);
+					return text({ ok: true, from: path, to: newPath });
+				},
+			);
+		}
+
+		if (allow("destructive")) {
+			mcp.registerTool(
+				"delete_note",
+				{
+					title: "Delete a note",
+					description:
+						"Send a note and its comment sidecar to trash (recoverable). Fails if the note does not exist.",
+					inputSchema: { path: z.string() },
+				},
+				async ({ path }) => {
+					assertPath(path);
+					if (!notes.trash) throw new Error("trash is not supported on this host");
+					if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+					await notes.trash(path);
+					const sidecar = store.commentsPath(path);
+					if (await notes.exists(sidecar)) await notes.trash(sidecar);
+					store.invalidateCache(path);
+					return text({ ok: true, path });
 				},
 			);
 		}

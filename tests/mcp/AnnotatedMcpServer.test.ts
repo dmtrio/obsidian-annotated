@@ -33,13 +33,23 @@ function buildNotes(): NoteAccess {
 		["inbox/other.md", "# Other\n\nfoo bar foo\n"],
 	]);
 	return {
-		exists: async (p) => notesStore.has(p),
+		exists: async (p) => notesStore.has(p) || storage.files.has(p),
 		read: async (p) => {
 			const c = notesStore.get(p);
-			if (c === undefined) throw new Error(`ENOENT ${p}`);
+			if (c === undefined) {
+				const sc = storage.files.get(p);
+				if (sc === undefined) throw new Error(`ENOENT ${p}`);
+				return sc;
+			}
 			return c;
 		},
-		write: async (p, content) => void notesStore.set(p, content),
+		write: async (p, content) => {
+			if (p.endsWith(".comments.json")) {
+				storage.files.set(p, content);
+			} else {
+				notesStore.set(p, content);
+			}
+		},
 		mkdir: async () => {},
 		listCommentedNotePaths: async () => {
 			const suffix = ".comments.json";
@@ -73,6 +83,23 @@ function buildNotes(): NoteAccess {
 			}
 			return hits.slice(0, opts?.limit ?? 20);
 		},
+		move: async (oldPath, newPath) => {
+			if (!notesStore.has(oldPath)) throw new Error(`ENOENT ${oldPath}`);
+			notesStore.set(newPath, notesStore.get(oldPath)!);
+			notesStore.delete(oldPath);
+			const oldSc = oldPath + ".comments.json";
+			const newSc = newPath + ".comments.json";
+			if (storage.files.has(oldSc)) {
+				const cf = JSON.parse(storage.files.get(oldSc)!);
+				cf.note_path = newPath;
+				storage.files.set(newSc, JSON.stringify(cf, null, 2));
+				storage.files.delete(oldSc);
+			}
+		},
+		trash: async (p) => {
+			notesStore.delete(p);
+			storage.files.delete(p);
+		},
 	};
 }
 
@@ -105,6 +132,8 @@ beforeAll(async () => {
 			scope: "full",
 			pathScope: ["fenced-zone"],
 		},
+		{ tokenHash: await hashToken("claude-destructive"), identityId: "i_claude", scope: "destructive" },
+		{ tokenHash: await hashToken("fenced-destructive"), identityId: "i_claude", scope: "destructive", pathScope: ["fenced-zone"] },
 	];
 	server = new AnnotatedMcpServer(
 		{
@@ -719,6 +748,187 @@ describe("note tools", () => {
 			expect(r.result.isError).toBe(true);
 
 			await client.close();
+		});
+	});
+
+	describe("destructive tools", () => {
+		it("tier visibility: destructive client sees move_note and delete_note", async () => {
+			const client = await mcpClient("claude-destructive");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).toContain("move_note");
+			expect(toolNames).toContain("delete_note");
+			await client.close();
+		});
+
+		it("tier visibility: additive client does not see destructive tools", async () => {
+			const client = await mcpClient("claude-full");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).not.toContain("move_note");
+			expect(toolNames).not.toContain("delete_note");
+			await client.close();
+		});
+
+		it("move_note relocates a note and carries its sidecar", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create a note with an additive client
+			await callTool(fullClient, "create_note", {
+				path: "inbox/movable.md",
+				content: "# Movable\n\nhello\n",
+			});
+
+			// Add a comment to it
+			await callTool(fullClient, "add_comment", {
+				path: "inbox/movable.md",
+				content: "note this",
+				startLine: 1,
+				endLine: 1,
+			});
+
+			// Verify the comment exists
+			let comments = await callTool(fullClient, "read_comments", { path: "inbox/movable.md" });
+			expect(comments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Move the note with destructive client
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/movable.md",
+				newPath: "inbox/moved.md",
+			});
+			expect(moveResult.body).toEqual({ ok: true, from: "inbox/movable.md", to: "inbox/moved.md" });
+
+			// Verify old note is gone
+			const oldRead = await callTool(fullClient, "read_note", { path: "inbox/movable.md" });
+			expect(oldRead.result.isError).toBe(true);
+
+			// Verify new note exists
+			const newRead = await callTool(fullClient, "read_note", { path: "inbox/moved.md" });
+			expect(newRead.body.content).toContain("# Movable");
+
+			// Verify comments followed the move
+			const movedComments = await callTool(fullClient, "read_comments", { path: "inbox/moved.md" });
+			expect(movedComments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Verify old sidecar has no comments
+			const oldComments = await callTool(fullClient, "read_comments", { path: "inbox/movable.md" });
+			expect(oldComments.body.comments).toEqual([]);
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("move_note rejects existing destination", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create two notes
+			await callTool(fullClient, "create_note", {
+				path: "inbox/source.md",
+				content: "# Source\n",
+			});
+			await callTool(fullClient, "create_note", {
+				path: "inbox/target.md",
+				content: "# Target\n",
+			});
+
+			// Try to move source to target (should fail)
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/source.md",
+				newPath: "inbox/target.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			// Verify both notes still exist unchanged
+			const sourceRead = await callTool(fullClient, "read_note", { path: "inbox/source.md" });
+			expect(sourceRead.body.content).toContain("# Source");
+			const targetRead = await callTool(fullClient, "read_note", { path: "inbox/target.md" });
+			expect(targetRead.body.content).toContain("# Target");
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("move_note rejects missing source", async () => {
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/nope.md",
+				newPath: "inbox/x.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			await destructiveClient.close();
+		});
+
+		it("delete_note trashes note and sidecar", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create a note with a comment
+			await callTool(fullClient, "create_note", {
+				path: "inbox/deletable.md",
+				content: "# Del\n",
+			});
+			await callTool(fullClient, "add_comment", {
+				path: "inbox/deletable.md",
+				content: "delete me",
+				startLine: 1,
+				endLine: 1,
+			});
+
+			// Verify comment exists
+			let comments = await callTool(fullClient, "read_comments", { path: "inbox/deletable.md" });
+			expect(comments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Delete with destructive client
+			const deleteResult = await callTool(destructiveClient, "delete_note", {
+				path: "inbox/deletable.md",
+			});
+			expect(deleteResult.body).toEqual({ ok: true, path: "inbox/deletable.md" });
+
+			// Verify note is gone
+			const readResult = await callTool(fullClient, "read_note", { path: "inbox/deletable.md" });
+			expect(readResult.result.isError).toBe(true);
+
+			// Verify comments sidecar file is gone (returns empty list per contract)
+			const afterDelete = await callTool(fullClient, "read_comments", { path: "inbox/deletable.md" });
+			expect(afterDelete.body.comments).toEqual([]);
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("fence blocks destructive ops outside scope", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const fencedDestructiveClient = await mcpClient("fenced-destructive");
+
+			// Create a note outside the fence
+			await callTool(fullClient, "create_note", {
+				path: "inbox/fence-test.md",
+				content: "# FenceTest\n",
+			});
+
+			// Try to move outside fence
+			const moveResult = await callTool(fencedDestructiveClient, "move_note", {
+				path: "inbox/fence-test.md",
+				newPath: "inbox/z.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			// Try to delete outside fence
+			const deleteResult = await callTool(fencedDestructiveClient, "delete_note", {
+				path: "inbox/fence-test.md",
+			});
+			expect(deleteResult.result.isError).toBe(true);
+
+			// Verify the note still exists
+			const readResult = await callTool(fullClient, "read_note", { path: "inbox/fence-test.md" });
+			expect(readResult.body.content).toContain("# FenceTest");
+
+			await fullClient.close();
+			await fencedDestructiveClient.close();
 		});
 	});
 });

@@ -204,7 +204,8 @@ export function buildAuthProvider(
 	};
 }
 
-export function buildNoteAccess(vault: Vault): NoteAccess {
+export function buildNoteAccess(app: App): NoteAccess {
+	const vault = app.vault;
 	return {
 		exists: (path) => vault.adapter.exists(path),
 		read: (path) => vault.adapter.read(path),
@@ -258,6 +259,16 @@ export function buildNoteAccess(vault: Vault): NoteAccess {
 			}
 			hits.sort((a, b) => b.score - a.score);
 			return hits.slice(0, limit);
+		},
+		move: async (oldPath, newPath) => {
+			const file = vault.getAbstractFileByPath(oldPath);
+			if (!file) throw new Error(`Note not found: ${oldPath}`);
+			await app.fileManager.renameFile(file, newPath);
+		},
+		trash: async (path) => {
+			const file = vault.getAbstractFileByPath(path);
+			if (!file) return;
+			await app.fileManager.trashFile(file);
 		},
 	};
 }
