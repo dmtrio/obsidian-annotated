@@ -1,0 +1,37 @@
+
+> obsidian-annotated@0.1.5 test
+> vitest run
+
+
+ RUN  v4.1.8 /Users/deme/git/obsidian-Annotated
+
+ ❯ tests/mcp/ProvenanceStamper.test.ts (8 tests | 1 failed) 6ms
+     × idempotency: calling onModify twice without guard (e.g. separate edits same day/author) stays stable 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/mcp/ProvenanceStamper.test.ts > ProvenanceStamper > idempotency: calling onModify twice without guard (e.g. separate edits same day/author) stays stable
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ tests/mcp/ProvenanceStamper.test.ts:129:22
+    127|   // The result should be identical (stampProvenance is idempotent)
+    128|   expect(afterFirst).toEqual(afterSecond);
+    129|   expect(writeCount).toBe(2); // Both stampers wrote (no shared guard)
+       |                      ^
+    130|  });
+    131|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 11 passed (12)
+      Tests  1 failed | 197 passed (198)
+   Start at  16:15:40
+   Duration  493ms (transform 590ms, setup 328ms, import 769ms, tests 323ms, environment 1ms)
+

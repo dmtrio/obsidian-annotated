@@ -53,6 +53,7 @@ import {
   resolveOAuthEnabled,
   resolvePublicUrl,
 } from "./mcp/PluginMcpHost";
+import { ProvenanceStamper } from "./mcp/ProvenanceStamper";
 
 export default class AnnotatedPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
@@ -61,6 +62,8 @@ export default class AnnotatedPlugin extends Plugin {
   private _selfSaveCount = 0;
   private mcpServer: { stop(): Promise<void>; address: string } | null = null;
   deviceStore: DeviceLocalStore;
+  private provenanceStamper: ProvenanceStamper | null = null;
+  private provenanceStamperDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 
   async onload() {
     await this.loadSettings();
@@ -131,6 +134,15 @@ export default class AnnotatedPlugin extends Plugin {
       },
     });
 
+    // Handle note creation: stamp provenance
+    this.registerEvent(
+      this.app.vault.on("create", (file) => {
+        if (this.provenanceStamper && file instanceof TFile) {
+          void this.provenanceStamper.onCreate(file.path);
+        }
+      }),
+    );
+
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (file.path.endsWith(".comments.json")) {
@@ -139,6 +151,15 @@ export default class AnnotatedPlugin extends Plugin {
           this.commentManager.invalidateCache(notePath);
           this.refreshGutterForFile(notePath);
           this.refreshSidebar();
+        } else if (file instanceof TFile && file.path.endsWith(".md") && this.provenanceStamper) {
+          // Debounced provenance stamping for .md files
+          const existing = this.provenanceStamperDebounce.get(file.path);
+          if (existing) clearTimeout(existing);
+          const timeout = setTimeout(() => {
+            void this.provenanceStamper!.onModify(file.path);
+            this.provenanceStamperDebounce.delete(file.path);
+          }, 800);
+          this.provenanceStamperDebounce.set(file.path, timeout);
         }
       }),
     );
@@ -244,6 +265,18 @@ export default class AnnotatedPlugin extends Plugin {
     });
 
     this.deviceStore = new DeviceLocalStore(this.app);
+
+    // Initialize ProvenanceStamper for frontmatter attribution
+    this.provenanceStamper = new ProvenanceStamper({
+      read: (path) => this.app.vault.adapter.read(path),
+      write: (path, content) => this.app.vault.adapter.write(path, content),
+      now: () => new Date().toISOString().slice(0, 10),
+      getAuthor: () => {
+        const identity = this.getUiAuthor();
+        return identity ? `${identity.name} <${identity.id}>` : null;
+      },
+    });
+
     if (Platform.isDesktop) {
       this.startMcpServer();
     }
@@ -312,6 +345,7 @@ export default class AnnotatedPlugin extends Plugin {
           },
           onLog: (msg) => log(msg),
           oauth,
+          provenance: { now: () => new Date().toISOString().slice(0, 10) },
         },
         bind,
       );
