@@ -236,5 +236,5 @@ export function resolveOAuthEnabled(device: DeviceLocalMcpConfig): boolean {
 /** Public base URL for OAuth metadata (the proxy-facing URL on the container). */
 export function resolvePublicUrl(bind: { host: string; port: number }): string {
 	const env = typeof process !== "undefined" ? process.env?.ANNOTATED_MCP_PUBLIC_URL : undefined;
-	return (env && env.replace(/\/+$/, "")) || `http://${bind.host}:${bind.port}`;
+	return (env && env.trim().replace(/\/+$/, "")) || `http://${bind.host}:${bind.port}`;
 }
