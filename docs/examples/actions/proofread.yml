@@ -1,0 +1,18 @@
+# proofread.yml — shows two things: an irregular past tense, and section output.
+#
+# Triggered by:  annotated: proofread
+# Cleared by:    the agent writing  annotated: proofread   (already past tense!)
+#
+# "proofread" is its own past tense, so the past-tense default would mis-derive
+# "proofreaded" — declaring `completedTag` explicitly is exactly what that's for.
+#
+# output: section → a MANAGED heading block in the SAME note. Re-running finds the
+# block by its heading and replaces it; it never duplicates or appends a second.
+completedTag: proofread
+clearedBy: agent
+output: section
+do: |
+  Proofread the note for spelling, grammar, and punctuation. Apply
+  uncontroversial corrections inline. Anything you deliberately did NOT change
+  (a judgment call, a possibly-intentional style choice) goes under a
+  "## Proofreading notes" section at the end. Then set the completedTag.

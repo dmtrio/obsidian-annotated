@@ -1,0 +1,13 @@
+# review.yml — the simplest request: a verb with nothing to configure.
+#
+# Triggered by:  annotated: review
+# Cleared by:    the agent writing  annotated: reviewed
+#
+# No `completedTag` → defaults to the past tense of the filename ("reviewed").
+# No `output`       → "none": the work IS leaving comments; there's no artifact
+#                     to write, so no note-write tool runs.
+clearedBy: agent
+do: |
+  Read the whole note. Leave a comment on each spot that has a real problem —
+  unclear wording, a claim that needs support, a broken structure, a gap.
+  Discuss; do not rewrite the note. When finished, set the completedTag.

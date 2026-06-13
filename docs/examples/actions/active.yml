@@ -1,0 +1,14 @@
+# active.yml — a MODE, not a request (D2).
+#
+# Triggered by:  annotated: active
+# Cleared by:    the HUMAN removing the field — the agent never clears a mode.
+#
+# No `completedTag`: its absence is what marks this as a mode. A mode is a
+# standing state, not a unit of work — it's announced once when it appears, then
+# it modulates behavior rather than generating repeat events.
+clearedBy: human
+do: |
+  Keep this note's current content loaded in working context while watching this
+  scope, so work elsewhere can rely on it. Do NOT modify the note or the field.
+  Subject to the active-notes budget (D6): if too many notes are active at once,
+  the watcher reports the overflow — it never silently drops one.
