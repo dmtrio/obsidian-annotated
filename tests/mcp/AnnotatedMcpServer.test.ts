@@ -567,3 +567,179 @@ describe("note tools", () => {
 		});
 	});
 });
+
+describe("provenance stamping", () => {
+	const PORT_PROV = 27982;
+	const BASE_PROV = `http://127.0.0.1:${PORT_PROV}`;
+
+	let serverProv: AnnotatedMcpServer;
+	let storageProv: InMemoryStorageAdapter;
+	let notesStoreProv: Map<string, string>;
+
+	function buildNotesProv(): NoteAccess {
+		notesStoreProv = new Map();
+		return {
+			exists: async (p) => notesStoreProv.has(p),
+			read: async (p) => {
+				const c = notesStoreProv.get(p);
+				if (c === undefined) throw new Error(`ENOENT ${p}`);
+				return c;
+			},
+			write: async (p, content) => void notesStoreProv.set(p, content),
+			mkdir: async () => {},
+			listCommentedNotePaths: async () => {
+				const suffix = ".comments.json";
+				return [...storageProv.files.keys()]
+					.filter((p) => p.endsWith(suffix))
+					.map((p) => p.slice(0, -suffix.length));
+			},
+		};
+	}
+
+	async function mcpClientProv(token: string): Promise<Client> {
+		const client = new Client({ name: "test-client", version: "0.0.0" });
+		await client.connect(
+			new StreamableHTTPClientTransport(new URL(`${BASE_PROV}/mcp`), {
+				requestInit: { headers: { Authorization: `Bearer ${token}` } },
+			}),
+		);
+		return client;
+	}
+
+	beforeAll(async () => {
+		storageProv = new InMemoryStorageAdapter();
+		const storeProv = new CommentStore(storageProv, { createdBy: "test@0.0.0" });
+		const keys: KeyRecord[] = [
+			{ tokenHash: await hashToken("claude-full"), identityId: "i_claude", scope: "full" },
+		];
+		serverProv = new AnnotatedMcpServer(
+			{
+				store: storeProv,
+				notes: buildNotesProv(),
+				auth: { getIdentities: () => [claude], getKeys: () => keys },
+				info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+				provenance: { now: () => "2099-06-13" },
+			},
+			{ port: PORT_PROV, host: "127.0.0.1" },
+		);
+		await serverProv.start();
+	});
+
+	afterAll(async () => {
+		await serverProv.stop();
+	});
+
+	it("create_note stamps created, createdBy, updated, updatedBy in frontmatter", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		const created = await callTool(client, "create_note", {
+			path: "test.md",
+			content: "# Test Note\n\nBody content",
+		});
+		expect(created.body).toEqual({ ok: true, path: "test.md" });
+
+		const read = await callTool(client, "read_note", { path: "test.md" });
+		const content = read.body.content;
+
+		// Check that all four fields are present
+		expect(content).toContain("created: 2099-06-13");
+		expect(content).toContain("createdBy: Claude <i_claude>");
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Body should be preserved
+		expect(content).toContain("# Test Note");
+		expect(content).toContain("Body content");
+
+		await client.close();
+	});
+
+	it("append_note respects write-once on created fields and updates updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		// Create a note with explicit created timestamp
+		notesStoreProv.set("existing.md", "---\ncreated: 2000-01-01\ncreatedBy: Bob <bob@example.com>\n---\n# Existing\n\nOld body");
+
+		const appended = await callTool(client, "append_note", {
+			path: "existing.md",
+			content: "## New Entry\n\nAppended content",
+		});
+		expect(appended.body).toEqual({ ok: true, path: "existing.md", appended: "## New Entry\n\nAppended content".length });
+
+		const read = await callTool(client, "read_note", { path: "existing.md" });
+		const content = read.body.content;
+
+		// Created fields should remain unchanged (write-once)
+		expect(content).toContain("created: 2000-01-01");
+		expect(content).toContain("createdBy: Bob <bob@example.com>");
+
+		// Updated fields should be refreshed
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Original and appended content should both be present
+		expect(content).toContain("# Existing");
+		expect(content).toContain("Old body");
+		expect(content).toContain("## New Entry");
+		expect(content).toContain("Appended content");
+
+		await client.close();
+	});
+
+	it("update_frontmatter stamps updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		notesStoreProv.set("fields.md", "---\nstatus: draft\n---\n# Note\n\nBody");
+
+		const updated = await callTool(client, "update_frontmatter", {
+			path: "fields.md",
+			set: { priority: "high" },
+		});
+		expect(updated.body).toEqual({ ok: true, path: "fields.md" });
+
+		const read = await callTool(client, "read_note", { path: "fields.md" });
+		const content = read.body.content;
+
+		// New fields from the call
+		expect(content).toContain("priority: high");
+		expect(content).toContain("status: draft");
+
+		// Provenance stamps
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Body unchanged
+		expect(content).toContain("# Note");
+		expect(content).toContain("Body");
+
+		await client.close();
+	});
+
+	it("patch_note stamps updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		notesStoreProv.set("patch.md", "---\nauthor: Alice\n---\n# Patch Test\n\nOld text here");
+
+		const patched = await callTool(client, "patch_note", {
+			path: "patch.md",
+			oldString: "Old text",
+			newString: "New text",
+		});
+		expect(patched.body).toEqual({ ok: true, replacements: 1 });
+
+		const read = await callTool(client, "read_note", { path: "patch.md" });
+		const content = read.body.content;
+
+		// Provenance stamps should be added
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Original field and patched content
+		expect(content).toContain("author: Alice");
+		expect(content).toContain("New text here");
+		expect(content).not.toContain("Old text");
+
+		await client.close();
+	});
+});
+

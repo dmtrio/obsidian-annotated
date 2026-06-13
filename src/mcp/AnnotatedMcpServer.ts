@@ -27,6 +27,7 @@ import {
 	queryActionable,
 	resolveQueryScope,
 	applyFrontmatterEdit,
+	stampProvenance,
 } from "@annotated/comments-core";
 import type {
 	Comment,
@@ -69,6 +70,8 @@ export interface AnnotatedMcpServerDeps {
 		handler: (req: IncomingMessage, res: ServerResponse) => void;
 		wwwAuthenticate: string;
 	};
+	/** When present, write tools stamp created/createdBy/updated/updatedBy. now() returns a date like "2026-06-13". */
+	provenance?: { now: () => string };
 }
 
 export interface AnnotatedMcpServerConfig {
@@ -277,7 +280,7 @@ export class AnnotatedMcpServer {
 			name: "obsidian-annotated",
 			version: this.deps.info.pluginVersion,
 		});
-		const { store, notes } = this.deps;
+		const { store, notes, provenance } = this.deps;
 		const text = (value: unknown) => ({
 			content: [{ type: "text" as const, text: JSON.stringify(value) }],
 		});
@@ -539,7 +542,14 @@ export class AnnotatedMcpServer {
 					prev = idx + matchLen;
 				}
 				updated += content.slice(prev);
-				await notes.write(path, updated);
+				const toWrite = provenance
+					? stampProvenance(updated, {
+							author: `${identity.name} <${identity.id}>`,
+							date: provenance.now(),
+							isCreate: false,
+						})
+					: updated;
+				await notes.write(path, toWrite);
 				return text({
 					ok: true,
 					replacements: targets.length,
@@ -572,7 +582,14 @@ export class AnnotatedMcpServer {
 				}
 				const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 				if (parent && notes.mkdir && !(await notes.exists(parent))) await notes.mkdir(parent);
-				await notes.write(path, content);
+				const toWrite = provenance
+					? stampProvenance(content, {
+							author: `${identity.name} <${identity.id}>`,
+							date: provenance.now(),
+							isCreate: true,
+						})
+					: content;
+				await notes.write(path, toWrite);
 				return text({ ok: true, path });
 			},
 		);
@@ -599,7 +616,14 @@ export class AnnotatedMcpServer {
 				}
 				const content = await notes.read(path);
 				const updated = applyFrontmatterEdit(content, { set, unset, listAdd, listRemove });
-				await notes.write(path, updated);
+				const toWrite = provenance
+					? stampProvenance(updated, {
+							author: `${identity.name} <${identity.id}>`,
+							date: provenance.now(),
+							isCreate: false,
+						})
+					: updated;
+				await notes.write(path, toWrite);
 				return text({ ok: true, path });
 			},
 		);
@@ -623,7 +647,15 @@ export class AnnotatedMcpServer {
 				// then a blank line, so appended sections don't run into prior text.
 				const base = existing.length === 0 ? "" : existing.replace(/\n*$/, "\n");
 				const sep = base === "" ? "" : "\n";
-				await notes.write(path, base + sep + content);
+				const updated = base + sep + content;
+				const toWrite = provenance
+					? stampProvenance(updated, {
+							author: `${identity.name} <${identity.id}>`,
+							date: provenance.now(),
+							isCreate: false,
+						})
+					: updated;
+				await notes.write(path, toWrite);
 				return text({ ok: true, path, appended: content.length });
 			},
 		);

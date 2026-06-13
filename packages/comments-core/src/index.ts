@@ -40,6 +40,7 @@ export {
 export {
 	readFrontmatter,
 	applyFrontmatterEdit,
+	stampProvenance,
 	type FrontmatterEdit,
 	type FrontmatterRead,
 } from "./frontmatter";

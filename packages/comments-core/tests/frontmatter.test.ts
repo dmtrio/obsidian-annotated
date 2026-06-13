@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFrontmatter, applyFrontmatterEdit, FrontmatterEdit, FrontmatterRead } from "../src/frontmatter";
+import { readFrontmatter, applyFrontmatterEdit, stampProvenance, FrontmatterEdit, FrontmatterRead } from "../src/frontmatter";
 
 describe("readFrontmatter", () => {
 	it("returns hasBlock: false for content without frontmatter block", () => {
@@ -541,5 +541,78 @@ tags: [item one, item two]
 Body`;
 		const result = readFrontmatter(content);
 		expect(result.lists.tags).toEqual(["item one", "item two"]);
+	});
+});
+
+describe("stampProvenance", () => {
+	it("on create with no frontmatter, sets all four fields (created, createdBy, updated, updatedBy)", () => {
+		const content = "# My Note\n\nBody content";
+		const result = stampProvenance(content, {
+			author: "Alice <alice@example.com>",
+			date: "2026-06-13",
+			isCreate: true,
+		});
+
+		const fm = readFrontmatter(result);
+		expect(fm.scalars.created).toBe("2026-06-13");
+		expect(fm.scalars.createdBy).toBe("Alice <alice@example.com>");
+		expect(fm.scalars.updated).toBe("2026-06-13");
+		expect(fm.scalars.updatedBy).toBe("Alice <alice@example.com>");
+		// Body preserved
+		expect(result).toContain("# My Note");
+		expect(result).toContain("Body content");
+	});
+
+	it("on create with existing created field, respects write-once and updates only updated/updatedBy", () => {
+		const content = `---
+created: 2020-01-01
+createdBy: Bob <bob@example.com>
+---
+# My Note
+
+Body`;
+		const result = stampProvenance(content, {
+			author: "Alice <alice@example.com>",
+			date: "2026-06-13",
+			isCreate: true,
+		});
+
+		const fm = readFrontmatter(result);
+		expect(fm.scalars.created).toBe("2020-01-01"); // unchanged
+		expect(fm.scalars.createdBy).toBe("Bob <bob@example.com>"); // unchanged
+		expect(fm.scalars.updated).toBe("2026-06-13"); // updated
+		expect(fm.scalars.updatedBy).toBe("Alice <alice@example.com>"); // updated
+		// Body preserved
+		expect(result).toContain("# My Note");
+		expect(result).toContain("Body");
+	});
+
+	it("on non-create (isCreate: false), only sets updated/updatedBy", () => {
+		const content = "# Note\n\nBody";
+		const result = stampProvenance(content, {
+			author: "Alice <alice@example.com>",
+			date: "2026-06-13",
+			isCreate: false,
+		});
+
+		const fm = readFrontmatter(result);
+		expect(fm.scalars.created).toBeUndefined(); // not set
+		expect(fm.scalars.createdBy).toBeUndefined(); // not set
+		expect(fm.scalars.updated).toBe("2026-06-13");
+		expect(fm.scalars.updatedBy).toBe("Alice <alice@example.com>");
+	});
+
+	it("preserves the body byte-for-byte", () => {
+		const body = "# My Note\n\nLine 1\nLine 2\n\nSpecial chars: !@#$%^&*()\n";
+		const content = body;
+		const result = stampProvenance(content, {
+			author: "Alice <alice@example.com>",
+			date: "2026-06-13",
+			isCreate: true,
+		});
+
+		// Extract the body from the result
+		const fm = readFrontmatter(result);
+		expect(result.endsWith(body)).toBe(true);
 	});
 });

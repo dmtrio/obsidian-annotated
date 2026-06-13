@@ -140,6 +140,19 @@ export function readFrontmatter(content: string): FrontmatterRead {
 	return { hasBlock, scalars, lists };
 }
 
+export function stampProvenance(
+	content: string,
+	opts: { author: string; date: string; isCreate: boolean },
+): string {
+	const set: Record<string, string> = { updated: opts.date, updatedBy: opts.author };
+	if (opts.isCreate) {
+		const existing = readFrontmatter(content);
+		if (existing.scalars.created === undefined) set.created = opts.date; // write-once
+		if (existing.scalars.createdBy === undefined) set.createdBy = opts.author; // write-once
+	}
+	return applyFrontmatterEdit(content, { set });
+}
+
 export function applyFrontmatterEdit(content: string, edit: FrontmatterEdit): string {
 	const { lines: fmLines, hasBlock, bodyStartIdx } = splitFrontmatter(content);
 	const body = content.slice(bodyStartIdx);
