@@ -338,6 +338,44 @@ describe("note tools", () => {
 		await client.close();
 	});
 
+	it("patch_note falls back to punctuation folding when the exact match misses", async () => {
+		const client = await mcpClient("claude-full");
+		// Note holds an em-dash title; caller patches with a plain hyphen.
+		notesStore.set("inbox/title.md", "# PLN — MCP OAuth Shim\n\nbody\n");
+		const r = await callTool(client, "patch_note", {
+			path: "inbox/title.md",
+			oldString: "# PLN - MCP OAuth Shim",
+			newString: "# PLN — MCP OAuth Shim (done)",
+		});
+		expect(r.body).toEqual({ ok: true, replacements: 1, viaNormalization: true });
+		// The replacement landed on the real span — em-dash original is gone,
+		// replaced by exactly what we asked for, body untouched.
+		expect(notesStore.get("inbox/title.md")).toBe(
+			"# PLN — MCP OAuth Shim (done)\n\nbody\n",
+		);
+		await client.close();
+	});
+
+	it("patch_note prefers an exact match over a folded one and stays loud on real misses", async () => {
+		const client = await mcpClient("claude-full");
+		notesStore.set("inbox/q.md", "straight 'quote' here\n");
+		// Exact match present → no normalization flag in the result.
+		const exact = await callTool(client, "patch_note", {
+			path: "inbox/q.md",
+			oldString: "'quote'",
+			newString: "'word'",
+		});
+		expect(exact.body).toEqual({ ok: true, replacements: 1 });
+		// Genuinely absent text still errors, fold or no fold.
+		const miss = await callTool(client, "patch_note", {
+			path: "inbox/q.md",
+			oldString: "nowhere",
+			newString: "x",
+		});
+		expect(miss.result.isError).toBe(true);
+		await client.close();
+	});
+
 	it("append_note adds to the end with a blank-line seam and never overwrites", async () => {
 		const client = await mcpClient("claude-full");
 		const before = notesStore.get("inbox/idea.md");

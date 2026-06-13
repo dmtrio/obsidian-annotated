@@ -77,6 +77,36 @@ export interface AnnotatedMcpServerConfig {
 
 const SNIPPET_MAX = 50;
 
+/**
+ * Fold visually-identical punctuation to one canonical form so patch_note can
+ * recover from dash/quote/space lookalikes (em-dash vs hyphen in titles is the
+ * recurring offender). STRICTLY length-preserving — every replacement is one
+ * code unit for one — so an index into the folded string is the same index into
+ * the original, which is what lets the patch rewrite the real bytes at a folded
+ * match. (Ellipsis … → ... is deliberately omitted: it changes length.)
+ */
+function foldPunct(s: string): string {
+	return s
+		.replace(/[‐-―−]/g, "-") // hyphen/figure/en/em dash, minus → "-"
+		.replace(/[‘’‚‛]/g, "'") // single curly quotes → '
+		.replace(/[“”„‟]/g, '"') // double curly quotes → "
+		.replace(/ /g, " "); // non-breaking space → space
+}
+
+/** Non-overlapping start indices of `needle` in `haystack` ([] if absent/empty). */
+function literalIndices(haystack: string, needle: string): number[] {
+	const out: number[] = [];
+	if (needle.length === 0) return out;
+	let from = 0;
+	for (;;) {
+		const i = haystack.indexOf(needle, from);
+		if (i === -1) break;
+		out.push(i);
+		from = i + needle.length;
+	}
+	return out;
+}
+
 export class AnnotatedMcpServer {
 	private httpServer: Server | null = null;
 
@@ -478,18 +508,42 @@ export class AnnotatedMcpServer {
 				}
 				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
 				const content = await notes.read(path);
-				const occurrences = content.split(oldString).length - 1;
-				if (occurrences === 0) throw new Error("oldString not found in note");
-				if (occurrences > 1 && !replaceAll) {
+
+				// Exact match wins. Only when the literal substring is absent do we
+				// retry with punctuation folding — the fold is length-preserving, so
+				// indices into the folded text address the original bytes directly,
+				// and we always rewrite the real bytes at the matched span. An
+				// ambiguous folded match errors exactly like an ambiguous exact one,
+				// so the fallback never silently hits the wrong target.
+				let indices = literalIndices(content, oldString);
+				let viaNormalization = false;
+				if (indices.length === 0) {
+					indices = literalIndices(foldPunct(content), foldPunct(oldString));
+					if (indices.length === 0) throw new Error("oldString not found in note");
+					viaNormalization = true;
+				}
+				if (indices.length > 1 && !replaceAll) {
 					throw new Error(
-						`oldString matches ${occurrences} times; pass replaceAll or a more specific string`,
+						`oldString matches ${indices.length} times${
+							viaNormalization ? " (via punctuation normalization)" : ""
+						}; pass replaceAll or a more specific string`,
 					);
 				}
-				const updated = replaceAll
-					? content.split(oldString).join(newString)
-					: content.replace(oldString, newString);
+				const targets = replaceAll ? indices : indices.slice(0, 1);
+				const matchLen = oldString.length; // fold preserves length
+				let updated = "";
+				let prev = 0;
+				for (const idx of targets) {
+					updated += content.slice(prev, idx) + newString;
+					prev = idx + matchLen;
+				}
+				updated += content.slice(prev);
 				await notes.write(path, updated);
-				return text({ ok: true, replacements: occurrences });
+				return text({
+					ok: true,
+					replacements: targets.length,
+					...(viaNormalization ? { viaNormalization: true } : {}),
+				});
 			},
 		);
 
