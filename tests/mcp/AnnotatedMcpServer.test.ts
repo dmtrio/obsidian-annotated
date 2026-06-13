@@ -98,6 +98,7 @@ beforeAll(async () => {
 			notes: buildNotes(),
 			auth: { getIdentities: () => [deme, claude], getKeys: () => keys },
 			info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+			getTagPrefix: () => "bot/",
 		},
 		{ port: PORT, host: "127.0.0.1" },
 	);
@@ -138,6 +139,22 @@ describe("HTTP auth matrix", () => {
 			headers: { Authorization: "Bearer claude-full" },
 		});
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("get_config", () => {
+	it("returns the tag prefix from the server deps", async () => {
+		const client = await mcpClient("claude-full");
+		const result = await callTool(client, "get_config", {});
+		expect(result.body).toEqual({ tagPrefix: "bot/" });
+		await client.close();
+	});
+
+	it("watch scope cannot access /mcp (returns 403)", async () => {
+		const res = await fetch(`${BASE}/mcp`, {
+			headers: { Authorization: "Bearer claude-watch" },
+		});
+		expect(res.status).toBe(403);
 	});
 });
 

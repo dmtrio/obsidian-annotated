@@ -52,6 +52,11 @@ export const strings = {
 			desc: "Who comments from this device are authored as. Identities are managed below and sync with the vault; this selection stays on this device.",
 			placeholder: "author",
 		},
+		tagPrefix: {
+			name: "Agent tag prefix",
+			desc: "Reserved namespace for tags the agent adds (synced). The agent only manages tags under this prefix — your own tags are never touched.",
+			placeholder: "bot/",
+		},
 		hotkey: {
 			name: "Add-comment shortcut",
 			desc: (key: string) => `Currently ${key}. Rebind it in Obsidian's Hotkeys settings.`,

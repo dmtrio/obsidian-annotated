@@ -75,6 +75,8 @@ export interface AnnotatedMcpServerDeps {
 	};
 	/** When present, write tools stamp created/createdBy/updated/updatedBy. now() returns a date like "2026-06-13". */
 	provenance?: { now: () => string };
+	/** Returns the synced tag prefix (e.g. "bot/") for agent-written tags. */
+	getTagPrefix?: () => string;
 }
 
 export interface AnnotatedMcpServerConfig {
@@ -338,6 +340,19 @@ export class AnnotatedMcpServer {
 				throw new Error(`Path is outside this key's folder fence: ${path}`);
 			}
 		};
+
+		mcp.registerTool(
+			"get_config",
+			{
+				title: "Get plugin config",
+				description:
+					"Read plugin configuration the agent needs — currently the reserved tag prefix (default 'bot/') for agent-written tags. Add/remove only tags under this prefix; never touch the user's other tags.",
+				inputSchema: {},
+			},
+			async () => {
+				return text({ tagPrefix: this.deps.getTagPrefix?.() ?? "bot/" });
+			},
+		);
 
 		mcp.registerTool(
 			"check_comments",

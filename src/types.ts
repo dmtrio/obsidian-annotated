@@ -28,6 +28,9 @@ export interface PluginSettings {
 	// between instances. Keys/bind-config are device-local — never here.
 	identities: Identity[];
 
+	// Reserved namespace for agent-written tags (synced). The agent only adds/removes tags under this prefix, never the user's flat tags.
+	tagPrefix: string;
+
 	// Filtering
 	hideResolvedByDefault: boolean;
 
@@ -44,6 +47,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	showGutterIndicators: true,
 	defaultAuthor: "claude",
 	identities: [],
+	tagPrefix: "bot/",
 	hideResolvedByDefault: true,
 	commentIndicatorStyle: "icon",
 	customGutterEmoji: "\u{1F4AC}",

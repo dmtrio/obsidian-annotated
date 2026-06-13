@@ -346,6 +346,7 @@ export default class AnnotatedPlugin extends Plugin {
           onLog: (msg) => log(msg),
           oauth,
           provenance: { now: () => new Date().toISOString().slice(0, 10) },
+          getTagPrefix: () => this.settings.tagPrefix ?? "bot/",
         },
         bind,
       );
@@ -1045,6 +1046,19 @@ class AnnotatedSettingTab extends PluginSettingTab {
         btn
           .setButtonText(strings.settings.hotkey.button)
           .onClick(() => this.plugin.openHotkeySettings()),
+      );
+
+    new Setting(containerEl)
+      .setName(strings.settings.tagPrefix.name)
+      .setDesc(strings.settings.tagPrefix.desc)
+      .addText((text) =>
+        text
+          .setPlaceholder(strings.settings.tagPrefix.placeholder)
+          .setValue(this.plugin.settings.tagPrefix ?? "bot/")
+          .onChange(async (value) => {
+            this.plugin.settings.tagPrefix = value || "bot/";
+            await this.plugin.saveSettings();
+          }),
       );
 
     // ── Display ──
