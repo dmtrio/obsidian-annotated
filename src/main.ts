@@ -52,6 +52,7 @@ import {
   resolveBindConfig,
   resolveOAuthEnabled,
   resolvePublicUrl,
+  tierLabel,
 } from "./mcp/PluginMcpHost";
 import { ProvenanceStamper } from "./mcp/ProvenanceStamper";
 
@@ -1340,26 +1341,44 @@ class AnnotatedSettingTab extends PluginSettingTab {
       });
     }
 
-    new Setting(mintGroup).addButton((btn) =>
-      btn
-        .setButtonText(strings.settings.mcp.mintButton)
-        .setCta()
-        .onClick(async () => {
-          if (!mintIdentityId) {
-            new Notice(strings.settings.mcp.mintNeedsIdentity);
-            return;
-          }
-          // Always a pair: the agent acts with full (read/write), its monitor
-          // polls with watch. Standalone keys have no use case (LOG 2026-06-12).
-          await this.plugin.deviceStore.mintPair(
-            mintIdentityId,
-            mintLabel.trim() || undefined,
-            [...mintFence],
-          );
-          new Notice(strings.settings.mcp.mintedPair);
-          this.display();
-        }),
-    );
+    new Setting(mintGroup)
+      .addButton((btn) =>
+        btn
+          .setButtonText(strings.settings.mcp.mintReadWrite)
+          .setCta()
+          .onClick(async () => {
+            if (!mintIdentityId) {
+              new Notice(strings.settings.mcp.mintNeedsIdentity);
+              return;
+            }
+            await this.plugin.deviceStore.mintPair(
+              mintIdentityId,
+              "additive",
+              mintLabel.trim() || undefined,
+              [...mintFence],
+            );
+            new Notice(strings.settings.mcp.mintedPair);
+            this.display();
+          }),
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText(strings.settings.mcp.mintDestructive)
+          .onClick(async () => {
+            if (!mintIdentityId) {
+              new Notice(strings.settings.mcp.mintNeedsIdentity);
+              return;
+            }
+            await this.plugin.deviceStore.mintPair(
+              mintIdentityId,
+              "destructive",
+              mintLabel.trim() || undefined,
+              [...mintFence],
+            );
+            new Notice(strings.settings.mcp.mintedPair);
+            this.display();
+          }),
+      );
 
     if (device.keys.length === 0) {
       containerEl.createEl("p", {
@@ -1388,9 +1407,10 @@ class AnnotatedSettingTab extends PluginSettingTab {
         : strings.settings.mcp.orphanedKey;
       const setting = new Setting(containerEl).setName(name).setDesc(fence);
 
-      const addCopy = (label: string, scope: "full" | "watch") => {
-        const record = keys.find((k) => k.scope === scope);
-        if (!record) return;
+      const tierRank = (s: string): number =>
+        ({ poll: 0, watch: 0, additive: 1, full: 1, destructive: 2 } as Record<string, number>)[s] ?? 0;
+      for (const record of [...keys].sort((a, b) => tierRank(a.scope) - tierRank(b.scope))) {
+        const label = tierLabel(record.scope);
         setting.addButton((btn) =>
           btn
             .setButtonText(label)
@@ -1404,9 +1424,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
               new Notice(strings.settings.mcp.copied(label));
             }),
         );
-      };
-      addCopy(strings.settings.mcp.pollName, "watch");
-      addCopy(strings.settings.mcp.writeName, "full");
+      }
 
       setting.addExtraButton((btn) =>
         btn

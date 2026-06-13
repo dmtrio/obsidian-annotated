@@ -12,6 +12,7 @@ import {
 	hashToken,
 	readFrontmatter,
 	pathInScope,
+	normalizeScope,
 	type Identity,
 	type KeyRecord,
 	type KeyScope,
@@ -78,25 +79,30 @@ export class DeviceLocalStore {
 	}
 
 	/**
-	 * Mint a full+watch key pair for an identity (creation and revocation are
+	 * Mint a poll+write key pair for an identity (creation and revocation are
 	 * pair-level by design — LOG 2026-06-12). Returns the tokens — shown once,
 	 * only hashes are stored.
 	 */
 	async mintPair(
 		identityId: string,
+		writeTier: "additive" | "destructive",
 		label?: string,
 		pathScope?: string[],
-	): Promise<{ full: string; watch: string }> {
+	): Promise<{ poll: string; write: string }> {
 		const pairId = "p_" + crypto.randomUUID();
 		const fence = pathScope && pathScope.length > 0 ? pathScope : undefined;
 		const config = this.load();
-		const tokens = {} as { full: string; watch: string };
-		for (const scope of ["full", "watch"] as KeyScope[]) {
+		const tokens = {} as { poll: string; write: string };
+		for (const scope of ["poll", writeTier] as KeyScope[]) {
 			const bytes = new Uint8Array(24);
 			crypto.getRandomValues(bytes);
 			const token =
 				`ann_${scope}_` + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-			tokens[scope] = token;
+			if (scope === "poll") {
+				tokens.poll = token;
+			} else {
+				tokens.write = token;
+			}
 			config.keys.push({
 				tokenHash: await hashToken(token),
 				token,
@@ -128,6 +134,15 @@ export class DeviceLocalStore {
 			(k) => k.pairId !== pairIdOrTokenHash && k.tokenHash !== pairIdOrTokenHash,
 		);
 		this.save(config);
+	}
+}
+
+/** Human-facing capability label for a stored key scope (handles legacy full/watch). */
+export function tierLabel(scope: string): string {
+	switch (normalizeScope(scope)) {
+		case "destructive": return "Read + Write + Move/Delete";
+		case "additive": return "Read + Write";
+		default: return "Read";
 	}
 }
 
