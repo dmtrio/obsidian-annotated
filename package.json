@@ -1,6 +1,6 @@
 {
   "name": "obsidian-annotated",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Code review-style comments for Obsidian notes",
   "main": "main.js",
   "scripts": {

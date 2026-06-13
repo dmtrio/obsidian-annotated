@@ -1,5 +1,5 @@
 ---
-status: draft
+status: accepted
 created: 2026-06-13
 parent: PLN - Event-Driven Comment Watch
 depends: PLN - Frontmatter & File Watch
@@ -7,6 +7,8 @@ repos:
   - obsidian-Annotated
 ---
 # PLN — Note Provenance & Tags
+
+> **Implementation status (2026-06-13): built behind v0.1.6, pending deploy + live verification.** Steps 1–4 implemented and tested: list-aware `update_frontmatter`, `stampProvenance` wired into all MCP write tools (gated on identity, git-style `name <id>`, write-once `created`), the `ProvenanceStamper` editor hooks for UI edits (loop-guarded), and the synced `tagPrefix` setting + `get_config` tool + skill tag policy. Step 5 (live verification) waits on deploying v0.1.6.
 
 > Stamp general provenance (`created`/`createdBy`/`updated`/`updatedBy`) onto notes as a side effect of writing them, and let the agent maintain content-derived tags under a reserved namespace. Distinct from [[PLN - Frontmatter & File Watch]] (the *watch channel* / action vocabulary) but shares its `update_frontmatter` tool and editor-hook plumbing — so it depends on that plan's tool landing first.
 

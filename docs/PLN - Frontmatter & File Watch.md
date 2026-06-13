@@ -1,11 +1,13 @@
 ---
-status: draft
+status: accepted
 created: 2026-06-13
 parent: PLN - Event-Driven Comment Watch
 repos:
   - obsidian-Annotated
 ---
 # PLN — Frontmatter & File Watch
+
+> **Implementation status (2026-06-13): built behind v0.1.6, pending deploy + live verification.** Steps 1–4 implemented and tested (200 unit tests + monitor harness): `update_frontmatter` tool, `queryActionableFrontmatter` + `/frontmatter/actionable` + `check_frontmatter`, `watch-frontmatter.sh`, and the skill's `actions/*.yml` + arming rules. Step 5 (live verification on the container/Mac) is the only remainder and waits on deploying v0.1.6.
 
 > Extend the event-driven watch from line-anchored comments to **note-level workflow state**. A human sets a frontmatter field (`annotated: review`); the same actionable-by-construction machinery that drives comment watching treats "field at a trigger value, in scope" as an event; the agent does the work and writes the field forward to a receipt. The request and its fulfillment live in the same data — no cursor, crash recovery free. Follow-on to [[PLN - Event-Driven Comment Watch]] (shipped, live on the container) and [[PLN - MCP OAuth Shim]] (done). This is the parked "designed-but-deferred" backlog from the LOG (2026-06-12), promoted to its own plan.
 
