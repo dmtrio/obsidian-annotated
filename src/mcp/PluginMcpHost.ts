@@ -216,6 +216,11 @@ export function buildNoteAccess(vault: Vault): NoteAccess {
 				.filter((f) => f.path.endsWith(suffix))
 				.map((f) => f.path.slice(0, -suffix.length));
 		},
+		listPaths: async () =>
+			vault
+				.getFiles()
+				.filter((f) => f.path.endsWith(".md"))
+				.map((f) => f.path),
 		listFrontmatter: async () => {
 			// TODO: metadataCache would be the cheaper source instead of reading files
 			const result = [];

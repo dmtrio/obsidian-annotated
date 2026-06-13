@@ -50,6 +50,8 @@ export interface NoteAccess {
 	mkdir?(path: string): Promise<void>;
 	/** Vault-relative paths of notes that have a comment sidecar. */
 	listCommentedNotePaths(): Promise<string[]>;
+	/** Vault-relative paths of all markdown notes (for list_notes). */
+	listPaths(): Promise<string[]>;
 	/** All notes' frontmatter (scalars only) for the frontmatter watch surface. Optional — absent ⇒ the surface returns []. */
 	listFrontmatter?(): Promise<Array<{ path: string; frontmatter: Record<string, string> }>>;
 }
@@ -600,6 +602,65 @@ export class AnnotatedMcpServer {
 					assertPath(path);
 					if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
 					return text({ path, content: await notes.read(path) });
+				},
+			);
+		}
+
+		if (allow("poll")) {
+			mcp.registerTool(
+				"list_notes",
+				{
+					title: "List notes",
+					description:
+						"Vault-relative paths of notes in scope, each flagged with whether it has comments. Fenced to the key's folder scope.",
+					inputSchema: {
+						path: z.string().optional().describe("Folder or note path scope (default: whole vault)"),
+					},
+				},
+				async ({ path }) => {
+					const scope = resolveQueryScope(path, key);
+					if (!scope.ok) throw new Error(`Scope is outside this key's folder fence: ${path}`);
+					const all = await notes.listPaths();
+					const commented = new Set(await notes.listCommentedNotePaths());
+					const inScope = (p: string) =>
+						scope.scopes === undefined ? true : scope.scopes.some((s) => pathInScope(p, s));
+					const notesOut = all
+						.filter((p) => keyAllowsPath(key, p) && inScope(p))
+						.map((p) => ({ path: p, hasComments: commented.has(p) }));
+					return text({ notes: notesOut });
+				},
+			);
+		}
+
+		if (allow("poll")) {
+			mcp.registerTool(
+				"read_multiple_notes",
+				{
+					title: "Read multiple notes",
+					description:
+						"Read up to 10 notes in one call. Partial success: unreadable or out-of-fence paths land in `err`, the rest in `ok`.",
+					inputSchema: {
+						paths: z
+							.array(z.string())
+							.max(10)
+							.describe("Up to 10 vault-relative note paths"),
+					},
+				},
+				async ({ paths }) => {
+					const ok: Array<{ path: string; content: string }> = [];
+					const err: Array<{ path: string; error: string }> = [];
+					for (const p of paths) {
+						if (!keyAllowsPath(key, p)) {
+							err.push({ path: p, error: "outside this key's folder fence" });
+							continue;
+						}
+						if (!(await notes.exists(p))) {
+							err.push({ path: p, error: "not found" });
+							continue;
+						}
+						ok.push({ path: p, content: await notes.read(p) });
+					}
+					return text({ ok, err });
 				},
 			);
 		}

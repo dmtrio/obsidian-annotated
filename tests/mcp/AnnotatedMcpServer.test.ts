@@ -47,6 +47,7 @@ function buildNotes(): NoteAccess {
 				.filter((p) => p.endsWith(suffix))
 				.map((p) => p.slice(0, -suffix.length));
 		},
+		listPaths: async () => [...notesStore.keys()].filter((p) => p.endsWith(".md")),
 		listFrontmatter: async () => {
 			const result = [];
 			for (const [path, content] of notesStore) {
@@ -879,6 +880,76 @@ describe("provenance stamping", () => {
 		expect(content).toContain("author: Alice");
 		expect(content).toContain("New text here");
 		expect(content).not.toContain("Old text");
+
+		await client.close();
+	});
+});
+
+describe("read-tier navigation tools", () => {
+	it("list_notes returns in-scope notes with hasComments flags", async () => {
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "list_notes", {});
+		expect(Array.isArray(body.notes)).toBe(true);
+		const paths = body.notes.map((n: any) => n.path);
+		expect(paths).toContain("inbox/idea.md");
+		expect(paths).toContain("inbox/other.md");
+		// All notes should have hasComments as a boolean
+		body.notes.forEach((note: any) => {
+			expect(typeof note.hasComments).toBe("boolean");
+		});
+		await client.close();
+	});
+
+	it("list_notes is fenced: fenced key sees empty vault", async () => {
+		const client = await mcpClient("fenced");
+		const { body } = await callTool(client, "list_notes", {});
+		expect(body.notes).toEqual([]);
+		await client.close();
+	});
+
+	it("read_multiple_notes partial success", async () => {
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md", "does/not/exist.md"],
+		});
+		expect(body.ok).toHaveLength(1);
+		expect(body.ok[0].path).toBe("inbox/idea.md");
+		expect(body.ok[0].content).toBeTruthy();
+		expect(body.err).toHaveLength(1);
+		expect(body.err[0].path).toBe("does/not/exist.md");
+		expect(body.err[0].error).toBe("not found");
+		await client.close();
+	});
+
+	it("read_multiple_notes fence miss", async () => {
+		const client = await mcpClient("fenced");
+		const { body } = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md"],
+		});
+		expect(body.ok).toEqual([]);
+		expect(body.err).toHaveLength(1);
+		expect(body.err[0].path).toBe("inbox/idea.md");
+		expect(body.err[0].error).toContain("fence");
+		await client.close();
+	});
+
+	it("poll tier can call list_notes and read_multiple_notes", async () => {
+		const client = await mcpClient("claude-watch");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+		expect(toolNames).toContain("list_notes");
+		expect(toolNames).toContain("read_multiple_notes");
+
+		// Verify they actually work
+		const list = await callTool(client, "list_notes", {});
+		expect(list.body.notes).toBeDefined();
+		expect(Array.isArray(list.body.notes)).toBe(true);
+
+		const read = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md"],
+		});
+		expect(read.body.ok).toBeDefined();
+		expect(read.body.err).toBeDefined();
 
 		await client.close();
 	});
