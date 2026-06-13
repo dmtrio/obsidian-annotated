@@ -79,6 +79,8 @@ The result is a clean **two-channel model**:
 
 - **D6 — Scope of the "active" mode is bounded.** `active` (keep-in-context) is the one value with an open-ended cost: a watcher honoring `active` on twenty large notes blows the context budget. Mitigation deferred to implementation: a per-scope cap on how many `active` notes are honored, and/or a size budget, with the overflow announced (never silently dropped — the "no silent caps" rule). Not a blocker for requests/receipts, which are bounded by construction.
 
+- **D7 — Chaining is a free emergent property; no declarative machinery.** Because a receipt is just another value in the same self-clearing field, a completed step's value can become the next step's request — a human flipping `proofed` → `translate/spanish` re-announces as a fresh translate request with **no new mechanism** (the ledger's `path + hash(value)` already handles it). This pipelining falls out of the single-scalar model for free and the manual form is supported on day one. **Declarative auto-chaining (a `then:` key) is explicitly out of scope** — it would add cycle-detection, advance-vs-audit, and runaway-pipeline concerns for a capability the human already has by hand; build it only if a concrete need appears.
+
 ## Plan
 
 > One commit per step in `obsidian-Annotated`. Container deploy rides livesync MAIN sync. This PLN is **blocked on deploy** of the note-write tools already built (v0.1.5: `create_note`, `append_note`, `patch_note` punctuation-folding) — those land first, then this builds on them.
