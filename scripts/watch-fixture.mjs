@@ -8,7 +8,7 @@ const STATE_FILE = process.argv[3];
 
 createServer((req, res) => {
 	const url = new URL(req.url ?? "/", "http://localhost");
-	if (url.pathname !== "/comments/actionable") {
+	if (url.pathname !== "/comments/actionable" && url.pathname !== "/frontmatter/actionable") {
 		res.writeHead(404).end();
 		return;
 	}
