@@ -60,6 +60,19 @@ function buildNotes(): NoteAccess {
 			}
 			return result;
 		},
+		search: async (query, scopes, opts) => {
+			const q = query.toLowerCase();
+			const inScope = (p: string) => (!scopes ? true : scopes.some((s) => p === s || p.startsWith(s + "/")));
+			const hits: Array<{ path: string; line: number; excerpt: string; score: number }> = [];
+			for (const [path, content] of notesStore) {
+				if (!path.endsWith(".md") || !inScope(path)) continue;
+				const idx = content.toLowerCase().indexOf(q);
+				if (idx === -1) continue;
+				const line = content.slice(0, idx).split("\n").length;
+				hits.push({ path, line, excerpt: content.slice(idx, idx + 40).replace(/\s+/g, " ").trim(), score: 1 });
+			}
+			return hits.slice(0, opts?.limit ?? 20);
+		},
 	};
 }
 
@@ -952,6 +965,122 @@ describe("read-tier navigation tools", () => {
 		expect(read.body.err).toBeDefined();
 
 		await client.close();
+	});
+
+	describe("search_notes", () => {
+		it("finds a match", async () => {
+			const client = await mcpClient("claude-full");
+			// Create a dedicated test note that won't be touched by other tests
+			await callTool(client, "create_note", {
+				path: "search-test/fixture.md",
+				content: "# Search Test\n\nThis is a searchable fixture.\n",
+			});
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toBeDefined();
+			expect(Array.isArray(body.hits)).toBe(true);
+			expect(body.hits.length).toBeGreaterThan(0);
+			const hit = body.hits[0];
+			expect(hit.path).toBe("search-test/fixture.md");
+			expect(typeof hit.line).toBe("number");
+			expect(hit.line).toBeGreaterThan(0);
+			expect(typeof hit.excerpt).toBe("string");
+			expect(hit.excerpt.length).toBeGreaterThan(0);
+			expect(typeof hit.score).toBe("number");
+			await client.close();
+		});
+
+		it("query that matches nothing returns empty", async () => {
+			const client = await mcpClient("claude-full");
+			const { body } = await callTool(client, "search_notes", { query: "zzznotfound" });
+			expect(body.hits).toEqual([]);
+			await client.close();
+		});
+
+		it("fenced key sees nothing outside its fence", async () => {
+			const client = await mcpClient("fenced");
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toEqual([]);
+			await client.close();
+		});
+
+		it("poll tier can search + tool is registered", async () => {
+			const client = await mcpClient("claude-watch");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).toContain("search_notes");
+
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toBeDefined();
+			expect(Array.isArray(body.hits)).toBe(true);
+
+			await client.close();
+		});
+
+		it("absent seam returns empty hits", async () => {
+			const PORT_NOSEARCH = 27982;
+			const BASE_NOSEARCH = `http://127.0.0.1:${PORT_NOSEARCH}`;
+
+			let serverNoSearch: AnnotatedMcpServer;
+			let storageNoSearch: InMemoryStorageAdapter;
+			let notesStoreNoSearch: Map<string, string>;
+
+			function buildNotesNoSearch(): NoteAccess {
+				notesStoreNoSearch = new Map([
+					["inbox/idea.md", "# Idea\n\nLine three has the thing.\n"],
+					["inbox/other.md", "# Other\n\nfoo bar foo\n"],
+				]);
+				return {
+					exists: async (p) => notesStoreNoSearch.has(p),
+					read: async (p) => {
+						const c = notesStoreNoSearch.get(p);
+						if (c === undefined) throw new Error(`ENOENT ${p}`);
+						return c;
+					},
+					write: async (p, content) => void notesStoreNoSearch.set(p, content),
+					mkdir: async () => {},
+					listCommentedNotePaths: async () => {
+						const suffix = ".comments.json";
+						return [...storageNoSearch.files.keys()]
+							.filter((p) => p.endsWith(suffix))
+							.map((p) => p.slice(0, -suffix.length));
+					},
+					listPaths: async () => [...notesStoreNoSearch.keys()].filter((p) => p.endsWith(".md")),
+					// Intentionally omit search method
+				};
+			}
+
+			try {
+				storageNoSearch = new InMemoryStorageAdapter();
+				const storeNoSearch = new CommentStore(storageNoSearch, { createdBy: "test@0.0.0" });
+				const keysNoSearch: KeyRecord[] = [
+					{ tokenHash: await hashToken("full-nosearch"), identityId: "i_claude", scope: "full" },
+				];
+				serverNoSearch = new AnnotatedMcpServer(
+					{
+						store: storeNoSearch,
+						notes: buildNotesNoSearch(),
+						auth: { getIdentities: () => [claude], getKeys: () => keysNoSearch },
+						info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+					},
+					{ port: PORT_NOSEARCH, host: "127.0.0.1" },
+				);
+				await serverNoSearch.start();
+
+				const client = new Client({ name: "test-client", version: "0.0.0" });
+				await client.connect(
+					new StreamableHTTPClientTransport(new URL(`${BASE_NOSEARCH}/mcp`), {
+						requestInit: { headers: { Authorization: "Bearer full-nosearch" } },
+					}),
+				);
+
+				const { body } = await callTool(client, "search_notes", { query: "thing" });
+				expect(body.hits).toEqual([]);
+
+				await client.close();
+			} finally {
+				if (serverNoSearch) await serverNoSearch.stop();
+			}
+		});
 	});
 });
 

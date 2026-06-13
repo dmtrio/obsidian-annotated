@@ -42,6 +42,13 @@ import type {
 	Tier,
 } from "@annotated/comments-core";
 
+export interface SearchHit {
+	path: string;
+	line: number; // 1-indexed line of the first match
+	excerpt: string;
+	score: number;
+}
+
 export interface NoteAccess {
 	exists(path: string): Promise<boolean>;
 	read(path: string): Promise<string>;
@@ -54,6 +61,8 @@ export interface NoteAccess {
 	listPaths(): Promise<string[]>;
 	/** All notes' frontmatter (scalars only) for the frontmatter watch surface. Optional — absent ⇒ the surface returns []. */
 	listFrontmatter?(): Promise<Array<{ path: string; frontmatter: Record<string, string> }>>;
+	/** Full-text search over notes. Optional — absent ⇒ search_notes returns []. `scopes` (undefined = whole vault) pre-filters; the server still fences results. */
+	search?(query: string, scopes: string[] | undefined, opts?: { limit?: number }): Promise<SearchHit[]>;
 }
 
 export interface AuthProvider {
@@ -661,6 +670,33 @@ export class AnnotatedMcpServer {
 						ok.push({ path: p, content: await notes.read(p) });
 					}
 					return text({ ok, err });
+				},
+			);
+		}
+
+		if (allow("poll")) {
+			mcp.registerTool(
+				"search_notes",
+				{
+					title: "Search notes",
+					description:
+						"Full-text search over notes in the key's fence/scope, ranked. Returns { path, line, excerpt, score } hits. Empty if search is unavailable on this host.",
+					inputSchema: {
+						query: z.string().min(1),
+						path: z.string().optional().describe("Folder or note path scope (default: whole vault)"),
+						limit: z.number().int().min(1).max(50).optional().describe("Max hits (default 20)"),
+					},
+				},
+				async ({ query, path, limit }) => {
+					const scope = resolveQueryScope(path, key);
+					if (!scope.ok) throw new Error(`Scope is outside this key's folder fence: ${path}`);
+					if (!notes.search) return text({ hits: [] });
+					const max = limit ?? 20;
+					const raw = await notes.search(query, scope.scopes, { limit: max });
+					const inScope = (p: string) =>
+						scope.scopes === undefined ? true : scope.scopes.some((s) => pathInScope(p, s));
+					const hits = raw.filter((h) => keyAllowsPath(key, h.path) && inScope(h.path)).slice(0, max);
+					return text({ hits });
 				},
 			);
 		}

@@ -7,16 +7,17 @@
  * - Env override (ANNOTATED_MCP_KEYS / _PORT / _HOST) → headless container
  *   path; survives container rebuilds where device-local storage would not.
  */
-import { App, Vault } from "obsidian";
+import { App, Vault, prepareSimpleSearch } from "obsidian";
 import {
 	hashToken,
 	readFrontmatter,
+	pathInScope,
 	type Identity,
 	type KeyRecord,
 	type KeyScope,
 } from "@annotated/comments-core";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { AuthProvider, NoteAccess } from "./AnnotatedMcpServer";
+import type { AuthProvider, NoteAccess, SearchHit } from "./AnnotatedMcpServer";
 
 export const DEFAULT_MCP_PORT = 27191;
 export const DEFAULT_MCP_HOST = "127.0.0.1";
@@ -238,6 +239,25 @@ export function buildNoteAccess(vault: Vault): NoteAccess {
 				}
 			}
 			return result;
+		},
+		search: async (query, scopes, opts) => {
+			const limit = opts?.limit ?? 20;
+			const scorer = prepareSimpleSearch(query);
+			const inScope = (p: string) => (!scopes ? true : scopes.some((s) => pathInScope(p, s)));
+			const files = vault.getMarkdownFiles().filter((f) => inScope(f.path));
+			const hits: SearchHit[] = [];
+			for (const f of files) {
+				const content = await vault.cachedRead(f);
+				const m = scorer(content);
+				if (!m) continue;
+				const offset = m.matches?.[0]?.[0] ?? 0;
+				const line = content.slice(0, offset).split("\n").length;
+				const start = Math.max(0, offset - 30);
+				const excerpt = content.slice(start, offset + 60).replace(/\s+/g, " ").trim();
+				hits.push({ path: f.path, line, excerpt, score: m.score });
+			}
+			hits.sort((a, b) => b.score - a.score);
+			return hits.slice(0, limit);
 		},
 	};
 }
