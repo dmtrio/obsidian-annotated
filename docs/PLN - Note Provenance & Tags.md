@@ -32,8 +32,14 @@ These ride on the same machinery (`update_frontmatter` + editor hooks) but are g
 
 ## Decisions
 
-- **D1 — Four scalar fields, not a compound string.** `created`, `createdBy`, `updated`, `updatedBy`. Separating date from author keeps each cleanly queryable (Dataview "notes Claude created", "edited this week") and — bonus — leaves `created` a **bare date**, matching the convention already in use across the vault's PLN/LOG frontmatter (additive, not a type change to existing notes).
-  - **`createdBy`/`updatedBy` carry name *and* id, git-style:** `createdBy: claude <i_c33ddf55>`. Name-first so search/group keys on the readable name; the id in brackets survives identity renames and disambiguates same-named identities — exactly git's `Author Name <email>`. Visible (frontmatter has no hidden values), which on reflection is a benefit for a historical record.
+- **D1 — Four scalar fields, not a compound string.** `created`, `createdBy`, `updated`, `updatedBy`. Separating date from author keeps each cleanly queryable (Dataview "notes Claude created", "edited this week") and — bonus — leaves `created` a **bare date**, matching the convention already in use across the vault's PLN/LOG frontmatter (additive, not a type change to existing notes). The split is consistent: **dates are bare, authors are git-style** —
+  ```yaml
+  created: 2026-06-13
+  createdBy: claude <i_c33ddf55>
+  updated: 2026-06-14
+  updatedBy: demetrio <i_7f7f832c>
+  ```
+  - **Both `createdBy` and `updatedBy` carry name *and* id, git-style** (`name <id>`). Name-first so search/group keys on the readable name; the id in brackets survives identity renames and disambiguates same-named identities — exactly git's `Author Name <email>`. Visible (frontmatter has no hidden values), which on reflection is a benefit for a historical record.
 
 - **D2 — Stamping rules.** `created`/`createdBy` are **write-once** at creation, never rewritten. `updated`/`updatedBy` stamp on **every real change — body or frontmatter** (including a tag edit or a watch receipt like `annotated: reviewed`; the user's call: "updates to frontmatter should change updated"). Never on reads, never on a no-op write. The stamp is **bundled into the triggering save** (one revision, not two) — which is what dissolves the churn concern that would otherwise apply (cf. the rejected per-keystroke line-number idea, LOG 2026-06-12). Gated on an identity existing: no identity selected → no stamp (never writes an unchosen name).
 
