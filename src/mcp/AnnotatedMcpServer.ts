@@ -26,6 +26,7 @@ import {
 	pathInScope,
 	queryActionable,
 	resolveQueryScope,
+	applyFrontmatterEdit,
 } from "@annotated/comments-core";
 import type {
 	Comment,
@@ -572,6 +573,33 @@ export class AnnotatedMcpServer {
 				const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 				if (parent && notes.mkdir && !(await notes.exists(parent))) await notes.mkdir(parent);
 				await notes.write(path, content);
+				return text({ ok: true, path });
+			},
+		);
+
+		mcp.registerTool(
+			"update_frontmatter",
+			{
+				title: "Update note frontmatter",
+				description:
+					"Set or clear frontmatter fields, or add/remove items from a list field (e.g. tags), without touching other fields or the note body. Field-addressed and non-clobbering — unlike patch_note it needs no match string.",
+				inputSchema: {
+					path: z.string(),
+					set: z.record(z.string()).optional(),
+					unset: z.array(z.string()).optional(),
+					listAdd: z.object({ field: z.string(), items: z.array(z.string()) }).optional(),
+					listRemove: z.object({ field: z.string(), items: z.array(z.string()) }).optional(),
+				},
+			},
+			async ({ path, set, unset, listAdd, listRemove }) => {
+				assertPath(path);
+				if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+				if (!set && !unset && !listAdd && !listRemove) {
+					throw new Error("update_frontmatter needs at least one of set/unset/listAdd/listRemove");
+				}
+				const content = await notes.read(path);
+				const updated = applyFrontmatterEdit(content, { set, unset, listAdd, listRemove });
+				await notes.write(path, updated);
 				return text({ ok: true, path });
 			},
 		);

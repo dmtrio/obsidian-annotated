@@ -429,4 +429,141 @@ describe("note tools", () => {
 		expect(notesStore.has("inbox/new.md")).toBe(false);
 		await client.close();
 	});
+
+	describe("update_frontmatter", () => {
+		it("set adds or updates a scalar field", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				set: { priority: "high" },
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			// Verify the field was added and other fields+body unchanged
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("priority: high");
+			expect(read.body.content).toContain("status: draft");
+			expect(read.body.content).toContain("# Idea");
+			expect(read.body.content).toContain("body");
+
+			await client.close();
+		});
+
+		it("unset removes a field", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\npriority: high\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				unset: ["status"],
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			// Verify the field was removed but others remain
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).not.toContain("status: draft");
+			expect(read.body.content).toContain("priority: high");
+			expect(read.body.content).toContain("# Idea");
+
+			await client.close();
+		});
+
+		it("listAdd adds a tag without duplication", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\ntags: [planning]\n---\n# Idea\n\nbody\n");
+
+			// Add a new tag
+			const r1 = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listAdd: { field: "tags", items: ["review"] },
+			});
+			expect(r1.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			let read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("tags:");
+			expect(read.body.content).toContain("planning");
+			expect(read.body.content).toContain("review");
+
+			// Add an existing tag (should not duplicate)
+			const r2 = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listAdd: { field: "tags", items: ["planning"] },
+			});
+			expect(r2.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			const content = read.body.content;
+			// Count occurrences of "planning" in the frontmatter (before the closing ---)
+			const fmEnd = content.indexOf("---\n# Idea");
+			const fm = content.slice(0, fmEnd);
+			const planningCount = (fm.match(/planning/g) || []).length;
+			expect(planningCount).toBe(1); // No duplication
+
+			await client.close();
+		});
+
+		it("listRemove removes a tag", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\ntags: [planning, review, done]\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listRemove: { field: "tags", items: ["review"] },
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("planning");
+			expect(read.body.content).not.toContain("review");
+			expect(read.body.content).toContain("done");
+
+			await client.close();
+		});
+
+		it("fenced key errors when targeting a path outside its fence", async () => {
+			const client = await mcpClient("fenced");
+			// The fenced token is scoped to "fenced-zone" folder (from the test setup)
+			// inbox/idea.md is outside that scope
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				set: { priority: "high" },
+			});
+			expect(r.result.isError).toBe(true);
+
+			// Verify the note was not modified
+			const content = notesStore.get("inbox/idea.md")!;
+			expect(content).not.toContain("priority: high");
+			expect(content).toContain("status: draft");
+
+			await client.close();
+		});
+
+		it("errors when the note does not exist", async () => {
+			const client = await mcpClient("claude-full");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/nonexistent.md",
+				set: { status: "archived" },
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+
+		it("errors when no operations are provided", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+	});
 });
