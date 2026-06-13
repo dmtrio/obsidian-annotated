@@ -184,15 +184,6 @@ describe("HTTP auth matrix", () => {
 	});
 });
 
-describe("get_config", () => {
-	it("returns the tag prefix from the server deps", async () => {
-		const client = await mcpClient("claude-full");
-		const result = await callTool(client, "get_config", {});
-		expect(result.body).toEqual({ tagPrefix: "bot/" });
-		await client.close();
-	});
-});
-
 describe("tier-gated tool registration", () => {
 	it("poll tier client can access read tools but not write tools", async () => {
 		const client = await mcpClient("claude-watch");
@@ -744,6 +735,127 @@ describe("note tools", () => {
 
 			const r = await callTool(client, "update_frontmatter", {
 				path: "inbox/idea.md",
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+	});
+
+	describe("tag_note", () => {
+		it("add: [\"draft\"] on a note with no tags → note has bot/draft, response shows added: [\"bot/draft\"]", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/a.md", "# A\n\nBody\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/a.md",
+				add: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.added).toEqual(["bot/draft"]);
+
+			const read = await callTool(client, "read_note", { path: "t/a.md" });
+			expect(read.body.content).toContain("tags:");
+			expect(read.body.content).toContain("bot/draft");
+
+			await client.close();
+		});
+
+		it("user's existing tags are untouched when adding prefixed tags", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/u.md", "---\ntags: [mcp, claude-code]\n---\n# U\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/u.md",
+				add: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+
+			const read = await callTool(client, "read_note", { path: "t/u.md" });
+			const content = read.body.content;
+			// All three tags should be present
+			expect(content).toContain("mcp");
+			expect(content).toContain("claude-code");
+			expect(content).toContain("bot/draft");
+
+			await client.close();
+		});
+
+		it("idempotent prefix: add: [\"bot/already\"] → writes bot/already, NOT bot/bot/already", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/id.md", "# Idempotent\n\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/id.md",
+				add: ["bot/already"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.added).toEqual(["bot/already"]);
+
+			const read = await callTool(client, "read_note", { path: "t/id.md" });
+			const content = read.body.content;
+			// Should contain exactly "bot/already", not "bot/bot/already"
+			expect(content).toContain("bot/already");
+			expect(content).not.toContain("bot/bot/already");
+
+			await client.close();
+		});
+
+		it("remove: [\"draft\"] on a note with bot/draft → tag removed, others intact", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/rem.md", "---\ntags: [mcp, bot/draft, other]\n---\n# Rem\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/rem.md",
+				remove: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.removed).toEqual(["bot/draft"]);
+
+			const read = await callTool(client, "read_note", { path: "t/rem.md" });
+			const content = read.body.content;
+			expect(content).toContain("mcp");
+			expect(content).not.toContain("bot/draft");
+			expect(content).toContain("other");
+
+			await client.close();
+		});
+
+		it("fenced key calling tag_note outside its fence → error, note unchanged", async () => {
+			const client = await mcpClient("fenced");
+			notesStore.set("inbox/fence.md", "---\ntags: []\n---\n# Fence\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "inbox/fence.md",
+				add: ["test"],
+			});
+			expect(r.result.isError).toBe(true);
+
+			// Verify note was not modified
+			const content = notesStore.get("inbox/fence.md")!;
+			expect(content).not.toContain("bot/test");
+
+			await client.close();
+		});
+
+		it("no-op (neither add nor remove) → error", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/noop.md", "# NoOp\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/noop.md",
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+
+		it("nonexistent note → error", async () => {
+			const client = await mcpClient("claude-full");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/does-not-exist.md",
+				add: ["tag"],
 			});
 			expect(r.result.isError).toBe(true);
 

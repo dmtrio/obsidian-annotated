@@ -359,20 +359,6 @@ export class AnnotatedMcpServer {
 		};
 		const allow = (minTier: Tier) => tierAllows(key.scope, minTier);
 
-		if (allow("poll")) {
-			mcp.registerTool(
-				"get_config",
-				{
-					title: "Get plugin config",
-					description:
-						"Read plugin configuration the agent needs — currently the reserved tag prefix (default 'bot/') for agent-written tags. Add/remove only tags under this prefix; never touch the user's other tags.",
-					inputSchema: {},
-				},
-				async () => {
-					return text({ tagPrefix: this.deps.getTagPrefix?.() ?? "bot/" });
-				},
-			);
-		}
 
 		if (allow("poll")) {
 			mcp.registerTool(
@@ -845,6 +831,61 @@ export class AnnotatedMcpServer {
 						: updated;
 					await notes.write(path, toWrite);
 					return text({ ok: true, path });
+				},
+			);
+		}
+
+		if (allow("additive")) {
+			mcp.registerTool(
+				"tag_note",
+				{
+					title: "Tag a note",
+					description:
+						"Add or remove content tags. The server namespaces every tag under the reserved agent prefix (default 'bot/') — pass bare tags like 'draft' and it writes 'bot/draft'. You cannot write outside the prefix, and the user's own (un-prefixed) tags are never affected.",
+					inputSchema: {
+						path: z.string(),
+						add: z.array(z.string()).optional(),
+						remove: z.array(z.string()).optional(),
+					},
+				},
+				async ({ path, add, remove }) => {
+					assertPath(path);
+					if (!(await notes.exists(path))) throw new Error(`Note not found: ${path}`);
+					if ((!add || add.length === 0) && (!remove || remove.length === 0)) {
+						throw new Error("tag_note needs add or remove");
+					}
+
+					// Prefix helper — idempotent, never double-prefixes
+					const prefix = this.deps.getTagPrefix?.() ?? "bot/";
+					const ns = (t: string) => (t.startsWith(prefix) ? t : prefix + t);
+
+					// Build the edit
+					const edit: {
+						listAdd?: { field: string; items: string[] };
+						listRemove?: { field: string; items: string[] };
+					} = {};
+					if (add?.length) {
+						edit.listAdd = { field: "tags", items: add.map(ns) };
+					}
+					if (remove?.length) {
+						edit.listRemove = { field: "tags", items: remove.map(ns) };
+					}
+
+					let content = applyFrontmatterEdit(await notes.read(path), edit);
+					const toWrite = provenance
+						? stampProvenance(content, {
+								author: `${identity.name} <${identity.id}>`,
+								date: provenance.now(),
+								isCreate: false,
+							})
+						: content;
+					await notes.write(path, toWrite);
+					return text({
+						ok: true,
+						path,
+						added: (add ?? []).map(ns),
+						removed: (remove ?? []).map(ns),
+					});
 				},
 			);
 		}

@@ -93,6 +93,6 @@ Drop a new `actions/<verb>.yml` (filename = trigger; receipt defaults to past te
 
 ## 7. Tags
 
-When you make a **substantive** content edit, you may reconcile a note's tags to its content — but only within the reserved prefix from `get_config` (default `bot/`): add `bot/<tag>` via `update_frontmatter` `listAdd`, drop stale ones via `listRemove`. **Never touch the user's other tags.** Add-biased; a trivial edit (a typo fix) doesn't warrant retagging.
+When you make a **substantive** content edit, you may reconcile a note's tags to its content with the `tag_note` tool: `tag_note(path, add: [...], remove: [...])`. Pass **bare** tags (`draft`, `needs-source`) — the server namespaces them under the reserved prefix (default `bot/`) for you, so you write `bot/draft` without typing the prefix and **cannot** write outside it. The user's own (un-prefixed) tags are never touched. To see what you've already tagged, read the note — your tags are the `bot/*` ones. Add-biased; a trivial edit (a typo fix) doesn't warrant retagging.
 
 Provenance fields (`created`/`createdBy`/`updated`/`updatedBy`) are stamped automatically by the server and the editor hooks — never write them yourself.
