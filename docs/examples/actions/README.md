@@ -2,7 +2,7 @@
 
 Reference set for the frontmatter-watch vocabulary (see
 [`../../PLN - Frontmatter & File Watch.md`](../../PLN%20-%20Frontmatter%20%26%20File%20Watch.md), D1a). At
-build time these live at `skill/watch-vault-comments/actions/`; the skill reads
+build time these live at `skill/watch-vault/actions/`; the skill reads
 the folder, derives the trigger list (the filenames) and the receipt
 exclude-set (the `completedTag` values), and arms the monitor — the bash script
 never parses YAML.

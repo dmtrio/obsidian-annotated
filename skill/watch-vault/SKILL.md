@@ -1,12 +1,12 @@
 ---
-name: watch-vault-comments
-description: Arm a background Monitor that watches an Obsidian vault scope for comment activity AND note-level frontmatter actions (e.g. annotated: review / summarize / translate) via the Annotated plugin's hosted endpoint, then act on each event through MCP tools — reply/edit/resolve for comments; do-the-work-then-write-a-receipt for frontmatter actions. Non-blocking — the conversation stays free between events. Use when the user wants comments or frontmatter workflows watched/handled while working on other things, or says "watch my vault comments".
+name: watch-vault
+description: Arm a background Monitor that watches an Obsidian vault scope for comment activity AND note-level frontmatter actions (e.g. annotated: review / summarize / translate) via the Annotated plugin's hosted endpoint, then act on each event through MCP tools — reply/edit/resolve for comments; do-the-work-then-write-a-receipt for frontmatter actions. Non-blocking — the conversation stays free between events. Use when the user wants comments or frontmatter workflows watched/handled while working on other things, or says "watch my vault" / "watch my vault comments".
 argument-hint: [vault-folder-scope]
 ---
 
-You are setting up an event-driven comment watch on the vault scope: `$ARGUMENTS` (empty = whole vault, subject to the key's folder fence).
+You are setting up an event-driven vault watch on the vault scope: `$ARGUMENTS` (empty = whole vault, subject to the key's folder fence). Two channels, same non-blocking model: **comments** — line-anchored discussion (§1–5) — and **frontmatter actions** — note-level workflow state (§6).
 
-This replaces the blocking `watch_comments` pattern: a Monitor polls the hosted endpoint in the background and injects one debounced line per note when threads need attention; you act on events via MCP tools and stay free otherwise.
+This replaces the blocking `watch_comments` pattern: a Monitor polls the hosted endpoint in the background and injects one debounced line per note when something needs attention; you act on events via MCP tools and stay free otherwise.
 
 ## 1. Resolve configuration (in order)
 
@@ -23,7 +23,7 @@ Call `check_comments` once with `path: "$ARGUMENTS"` (omit `excludeAuthors` — 
 Use the Monitor tool with the script bundled in this skill:
 
 ```
-bash ~/.claude/skills/watch-vault-comments/watch-comments.sh
+bash ~/.claude/skills/watch-vault/watch-comments.sh
 ```
 
 Environment for the Monitor (no secrets inline — reference the env var by name):
@@ -66,7 +66,7 @@ Comments are line-anchored discussion; frontmatter is note-level workflow state.
 Arm a second Monitor with the bundled script:
 
 ```
-bash ~/.claude/skills/watch-vault-comments/watch-frontmatter.sh
+bash ~/.claude/skills/watch-vault/watch-frontmatter.sh
 ```
 
 Env: `WATCH_ENDPOINT=<endpoint>`, `WATCH_KEY_VAR=ANNOTATED_WATCH_KEY`, `WATCH_TRIGGERS=<action filenames>`, `WATCH_SCOPE=$ARGUMENTS` (omit if empty), `WATCH_FIELD=annotated` (default), defaults fine for `POLL_INTERVAL`/`DEBOUNCE_QUIET`. Initial backlog: call `check_frontmatter` with `{ triggers: [...], path: "$ARGUMENTS" }` once and handle results before arming.
