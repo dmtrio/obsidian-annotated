@@ -1,6 +1,6 @@
 ---
 name: watch-vault
-description: Watch an Obsidian vault (Annotated plugin) for comment threads and frontmatter actions, handling each in the background — non-blocking. Use for "watch my vault" / "watch my vault comments".
+description: Watch an Obsidian vault (Annotated plugin) for comment threads and frontmatter actions (review, summarize), handled in the background — non-blocking. Use for "watch my vault" or "review my vault".
 argument-hint: [vault-folder-scope]
 ---
 
