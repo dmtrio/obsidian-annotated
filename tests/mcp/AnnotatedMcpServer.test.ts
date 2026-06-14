@@ -15,7 +15,7 @@ import {
 	type Identity,
 	type KeyRecord,
 } from "@annotated/comments-core";
-import { AnnotatedMcpServer, type NoteAccess } from "../../src/mcp/AnnotatedMcpServer";
+import { AnnotatedMcpServer, type NoteAccess } from "../../server/AnnotatedMcpServer";
 
 const PORT = 27981;
 const BASE = `http://127.0.0.1:${PORT}`;

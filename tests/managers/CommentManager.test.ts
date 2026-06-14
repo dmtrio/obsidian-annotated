@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommentManager } from "../../src/managers/CommentManager";
+import { CommentManager } from "../../plugin/managers/CommentManager";
 import { createMockVault } from "../mocks/vault";
-import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "../../src/types";
+import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "../../plugin/types";
 
 function makeComment(overrides: Partial<Comment> = {}): Comment {
   const now = new Date().toISOString();

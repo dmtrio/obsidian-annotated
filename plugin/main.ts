@@ -53,8 +53,8 @@ import {
   resolveOAuthEnabled,
   resolvePublicUrl,
   tierLabel,
-} from "./mcp/PluginMcpHost";
-import { ProvenanceStamper } from "./mcp/ProvenanceStamper";
+} from "../server/PluginMcpHost";
+import { ProvenanceStamper } from "./ProvenanceStamper";
 
 export default class AnnotatedPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
@@ -302,7 +302,7 @@ export default class AnnotatedPlugin extends Plugin {
         await log("server disabled on this device");
         return;
       }
-      const { AnnotatedMcpServer } = await import("./mcp/AnnotatedMcpServer");
+      const { AnnotatedMcpServer } = await import("../server/AnnotatedMcpServer");
       const getIdentities = () => this.settings.identities;
       const getEnvKeys = await loadEnvKeys(getIdentities, (warning) => {
         console.warn(`Annotated: ${warning}`);
@@ -316,7 +316,7 @@ export default class AnnotatedPlugin extends Plugin {
       // of it — is tree-shaken out of main.js.
       let oauth: { handler: (req: never, res: never) => void; wwwAuthenticate: string } | undefined;
       if (BUILD_OAUTH && resolveOAuthEnabled(device)) {
-        const { buildOAuthGate, wwwAuthenticate } = await import("./mcp/OAuthGate");
+        const { buildOAuthGate, wwwAuthenticate } = await import("../server/OAuthGate");
         const issuerUrl = resolvePublicUrl(bind);
         const gate = buildOAuthGate({
           verifyKey: async (token) => {

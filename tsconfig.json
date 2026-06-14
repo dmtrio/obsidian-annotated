@@ -18,10 +18,12 @@
       "ES7"
     ],
     "paths": {
-      "src/*": ["src/*"]
+      "plugin/*": ["plugin/*"],
+      "server/*": ["server/*"]
     }
   },
   "include": [
-    "src/**/*.ts"
+    "plugin/**/*.ts",
+    "server/**/*.ts"
   ]
 }

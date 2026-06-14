@@ -2,7 +2,7 @@
  * Tests for ProvenanceStamper: loop guard, idempotency, no-op conditions.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { ProvenanceStamper } from "../../src/mcp/ProvenanceStamper";
+import { ProvenanceStamper } from "../../plugin/ProvenanceStamper";
 
 describe("ProvenanceStamper", () => {
 	let store: Map<string, string>;

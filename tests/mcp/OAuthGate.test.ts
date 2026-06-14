@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, Server } from "http";
 import { createHash, randomBytes } from "crypto";
-import { buildOAuthGate, wwwAuthenticate, LOGIN_PATH } from "../../src/mcp/OAuthGate";
+import { buildOAuthGate, wwwAuthenticate, LOGIN_PATH } from "../../server/OAuthGate";
 
 const PORT = 27983;
 const BASE_URL = `http://127.0.0.1:${PORT}`;

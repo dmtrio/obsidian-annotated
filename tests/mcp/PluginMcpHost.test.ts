@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DeviceLocalStore, tierLabel } from "../../src/mcp/PluginMcpHost";
+import { DeviceLocalStore, tierLabel } from "../../server/PluginMcpHost";
 import type { App } from "obsidian";
 
 function fakeApp(): App {

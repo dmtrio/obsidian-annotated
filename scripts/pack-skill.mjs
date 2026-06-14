@@ -5,7 +5,7 @@
  * claude.ai requires the .zip to contain a SINGLE top-level folder named after
  * the skill, with SKILL.md inside it (review-vault/SKILL.md, …) — a SKILL.md at
  * the archive root fails silently on upload. We get that by running `zip` from
- * inside skill/ with the folder name as the argument.
+ * inside skills/ with the folder name as the argument.
  *
  * Usage: node scripts/pack-skill.mjs [skill-name]   (default: watch-vault)
  */
@@ -15,7 +15,7 @@ import { join } from "node:path";
 
 const skillName = process.argv[2] ?? "watch-vault";
 const root = process.cwd();
-const skillDir = join(root, "skill", skillName);
+const skillDir = join(root, "skills", skillName);
 const skillMd = join(skillDir, "SKILL.md");
 const outZip = join(root, "dist", `${skillName}.zip`);
 
@@ -58,7 +58,7 @@ if (fail) process.exit(1);
 mkdirSync(join(root, "dist"), { recursive: true });
 rmSync(outZip, { force: true });
 execFileSync("zip", ["-rq", outZip, skillName, "-x", "*.DS_Store", "-x", "__MACOSX/*"], {
-	cwd: join(root, "skill"),
+	cwd: join(root, "skills"),
 	stdio: "inherit",
 });
 console.log(`pack-skill: wrote ${outZip}  (top-level folder: ${skillName}/)`);
