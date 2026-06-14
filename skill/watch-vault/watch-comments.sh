@@ -22,7 +22,11 @@
 set -u
 
 WATCH_KEY_VAR="${WATCH_KEY_VAR:-ANNOTATED_WATCH_KEY}"
-key="${!WATCH_KEY_VAR-}"
+# Key precedence: explicit WATCH_KEY > $ANNOTATED_WATCH_KEY (by name) > baked
+# literal. WATCH_KEY_BAKED is empty in source; the claude.ai build may substitute
+# a poll key here for sandboxes that can't inject env vars (scripts/pack-skill.mjs).
+WATCH_KEY_BAKED=""
+key="${WATCH_KEY:-${!WATCH_KEY_VAR:-$WATCH_KEY_BAKED}}"
 if [ -z "${WATCH_ENDPOINT-}" ]; then
   echo "watch-comments: WATCH_ENDPOINT is required" >&2
   exit 2

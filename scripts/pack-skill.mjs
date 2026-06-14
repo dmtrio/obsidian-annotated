@@ -124,6 +124,34 @@ if (envFile) {
 			console.log(`pack-skill: ${label}: "${find}" -> "${val}" (${hits} place${hits === 1 ? "" : "s"})`);
 		}
 	}
+
+	// Bake the poll key for sandboxes that can't inject env vars at runtime
+	// (claude.ai web). The value comes from the SHELL env at build time — never a
+	// committed file — and is REDACTED from logs. The resulting zip then carries a
+	// live (poll-scope) key: treat dist/*.claude-ai.zip as a secret, and rotate by
+	// re-minting the key + rebuilding. In Claude Code/API the env var wins, so the
+	// baked literal is only the fallback where nothing else supplies the key.
+	const watchKey = process.env.ANNOTATED_WATCH_KEY;
+	const bakeFind = 'WATCH_KEY_BAKED=""';
+	if (watchKey) {
+		const esc = watchKey.replace(/(["\\$`])/g, "\\$1");
+		const repl = `WATCH_KEY_BAKED="${esc}"`;
+		let hits = 0;
+		for (const f of files) {
+			const before = readFileSync(f, "utf8");
+			const occ = before.split(bakeFind).length - 1;
+			if (occ === 0) continue;
+			writeFileSync(f, before.split(bakeFind).join(repl));
+			hits += occ;
+		}
+		if (hits === 0) console.warn(`pack-skill: ANNOTATED_WATCH_KEY set but no ${bakeFind} placeholder found`);
+		else console.log(`pack-skill: baked watch key into ${hits} script${hits === 1 ? "" : "s"} [redacted, ${watchKey.length} chars]`);
+	} else {
+		console.warn(
+			"pack-skill: ANNOTATED_WATCH_KEY not set — no key baked; this build can't authenticate where env injection is unavailable (claude.ai web). Set it in your shell to bake it.",
+		);
+	}
+
 	zipFrom = stageRoot;
 	cleanup = () => rmSync(stageRoot, { recursive: true, force: true });
 }
