@@ -205,6 +205,11 @@ describe("tier-gated tool registration", () => {
 		expect(toolNames).not.toContain("update_frontmatter");
 		expect(toolNames).not.toContain("reply_to_comment");
 		expect(toolNames).not.toContain("resolve_comment");
+		expect(toolNames).not.toContain("tag_note");
+
+		// Destructive tier tools should NOT be present either
+		expect(toolNames).not.toContain("move_note");
+		expect(toolNames).not.toContain("delete_note");
 
 		await client.close();
 	});
@@ -225,6 +230,7 @@ describe("tier-gated tool registration", () => {
 		expect(toolNames).toContain("create_note");
 		expect(toolNames).toContain("append_note");
 		expect(toolNames).toContain("update_frontmatter");
+		expect(toolNames).toContain("tag_note");
 		expect(toolNames).toContain("reply_to_comment");
 		expect(toolNames).toContain("resolve_comment");
 
