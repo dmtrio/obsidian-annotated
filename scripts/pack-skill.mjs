@@ -5,26 +5,50 @@
  * claude.ai requires the .zip to contain a SINGLE top-level folder named after
  * the skill, with SKILL.md inside it (watch-vault/SKILL.md, …) — a SKILL.md at
  * the archive root fails silently on upload. We get that structure by running
- * `zip` from inside skill/ with the folder name as the argument.
+ * `zip` from inside (a staging copy of) skill/ with the folder name as the arg.
  *
- * Usage: node scripts/pack-skill.mjs [skill-name]   (default: watch-vault)
+ * Substitution (--env): the source SKILL.md keeps its Claude Code defaults
+ * (localhost endpoint, ~/.claude/skills paths) so it works here directly. When
+ * an env file is passed, those env-specific literals are rewritten in a STAGING
+ * COPY before zipping — so the uploaded build can point at the hosted endpoint
+ * and the claude.ai file layout without touching the source.
+ *
+ * Usage:
+ *   node scripts/pack-skill.mjs [skill-name]
+ *   node scripts/pack-skill.mjs [skill-name] --env skill/pack.claude-ai.env
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import {
+	mkdirSync,
+	rmSync,
+	readFileSync,
+	writeFileSync,
+	existsSync,
+	cpSync,
+	readdirSync,
+} from "node:fs";
+import { join, extname } from "node:path";
 
-const skillName = process.argv[2] ?? "watch-vault";
+// --- args --------------------------------------------------------------------
+const argv = process.argv.slice(2);
+let skillName = "watch-vault";
+let envFile = null;
+for (let i = 0; i < argv.length; i++) {
+	if (argv[i] === "--env") envFile = argv[++i];
+	else if (!argv[i].startsWith("--")) skillName = argv[i];
+}
+
 const root = process.cwd();
-const skillDir = join(root, "skill", skillName);
-const skillMd = join(skillDir, "SKILL.md");
-const outZip = join(root, "dist", `${skillName}.zip`);
+const skillSrc = join(root, "skill", skillName);
+const skillMd = join(skillSrc, "SKILL.md");
+const outZip = join(root, "dist", `${skillName}${envFile ? ".claude-ai" : ""}.zip`);
 
 if (!existsSync(skillMd)) {
 	console.error(`pack-skill: ${skillMd} not found`);
 	process.exit(1);
 }
 
-// --- Validate the frontmatter against claude.ai's limits ---------------------
+// --- validate frontmatter against claude.ai's limits -------------------------
 // name: <=64 chars, lowercase letters/numbers/hyphens. description: <=200 chars.
 const md = readFileSync(skillMd, "utf8");
 const fm = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -39,34 +63,109 @@ const field = (name) => {
 const name = field("name");
 const description = field("description");
 let fail = false;
-
-if (!name) {
-	console.error("pack-skill: frontmatter is missing `name`");
-	fail = true;
-} else if (!/^[a-z0-9-]{1,64}$/.test(name)) {
+if (!name || !/^[a-z0-9-]{1,64}$/.test(name)) {
 	console.error(`pack-skill: name "${name}" must be lowercase letters/numbers/hyphens, <=64 chars`);
 	fail = true;
 } else if (name !== skillName) {
 	console.warn(`pack-skill: WARNING name "${name}" != folder "${skillName}" (claude.ai wants them to match)`);
 }
-
 if (!description) {
 	console.error("pack-skill: frontmatter is missing `description`");
 	fail = true;
 } else if (description.length > 200) {
-	// Warn, don't fail: the build still produces a zip, but claude.ai may reject
-	// or truncate an over-long description, hurting how the skill gets triggered.
 	console.warn(
 		`pack-skill: WARNING description is ${description.length} chars (claude.ai limit is 200) — shorten it or the upload may reject/truncate it`,
 	);
 }
 if (fail) process.exit(1);
 
-// --- Zip with the required single-top-level-folder layout --------------------
+// --- optional env-driven substitution into a staging copy --------------------
+// Each rule maps a literal in the source to the env var that overrides it for
+// the build. The source keeps the literal (works locally); the staged copy gets
+// the env value. Add a rule here when a new env-specific literal needs swapping.
+const RULES = [
+	{ env: "ANNOTATED_MCP_ENDPOINT", find: "http://127.0.0.1:27191", label: "default endpoint" },
+	{ env: "SKILL_BASE_DIR", find: `~/.claude/skills/${skillName}`, label: "bundled-script path" },
+];
+
+let zipFrom = join(root, "skill"); // default: zip straight from the source tree
+let cleanup = null;
+
+if (envFile) {
+	if (!existsSync(envFile)) {
+		console.error(`pack-skill: env file ${envFile} not found`);
+		process.exit(1);
+	}
+	const env = parseEnv(readFileSync(envFile, "utf8"));
+	const stageRoot = join(root, "dist", ".skill-stage");
+	rmSync(stageRoot, { recursive: true, force: true });
+	const stageSkill = join(stageRoot, skillName);
+	mkdirSync(stageRoot, { recursive: true });
+	cpSync(skillSrc, stageSkill, { recursive: true });
+
+	const files = listTextFiles(stageSkill);
+	for (const { env: key, find, label } of RULES) {
+		const val = env[key];
+		if (!val) {
+			console.warn(`pack-skill: ${key} not set in ${envFile} — leaving ${label} unchanged`);
+			continue;
+		}
+		let hits = 0;
+		for (const f of files) {
+			const before = readFileSync(f, "utf8");
+			const occ = before.split(find).length - 1;
+			if (occ === 0) continue;
+			writeFileSync(f, before.split(find).join(val));
+			hits += occ;
+		}
+		if (hits === 0) {
+			console.warn(`pack-skill: ${key} set but "${find}" not found — nothing substituted for ${label}`);
+		} else {
+			console.log(`pack-skill: ${label}: "${find}" -> "${val}" (${hits} place${hits === 1 ? "" : "s"})`);
+		}
+	}
+	zipFrom = stageRoot;
+	cleanup = () => rmSync(stageRoot, { recursive: true, force: true });
+}
+
+// --- zip with the required single-top-level-folder layout --------------------
 mkdirSync(join(root, "dist"), { recursive: true });
 rmSync(outZip, { force: true });
 execFileSync("zip", ["-rq", outZip, skillName, "-x", "*.DS_Store", "-x", "__MACOSX/*"], {
-	cwd: join(root, "skill"),
+	cwd: zipFrom,
 	stdio: "inherit",
 });
+cleanup?.();
 console.log(`pack-skill: wrote ${outZip}  (top-level folder: ${skillName}/)`);
+
+// --- helpers -----------------------------------------------------------------
+function parseEnv(text) {
+	const out = {};
+	for (const line of text.split(/\r?\n/)) {
+		const t = line.trim();
+		if (!t || t.startsWith("#")) continue;
+		const eq = t.indexOf("=");
+		if (eq === -1) continue;
+		const k = t.slice(0, eq).trim();
+		let v = t.slice(eq + 1).trim();
+		if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+			v = v.slice(1, -1);
+		}
+		out[k] = v;
+	}
+	return out;
+}
+
+function listTextFiles(dir) {
+	const exts = new Set([".md", ".sh", ".yml", ".yaml", ".txt"]);
+	const out = [];
+	const walk = (d) => {
+		for (const e of readdirSync(d, { withFileTypes: true })) {
+			const p = join(d, e.name);
+			if (e.isDirectory()) walk(p);
+			else if (exts.has(extname(e.name))) out.push(p);
+		}
+	};
+	walk(dir);
+	return out;
+}
