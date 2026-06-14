@@ -8,6 +8,7 @@
     "build": "node esbuild.config.mjs production",
     "build:lite": "node esbuild.config.mjs production-lite",
     "dist": "node esbuild.config.mjs production && mkdir -p dist/obsidian-annotated && cp main.js manifest.json styles.css dist/obsidian-annotated/",
+    "skill:zip": "node scripts/pack-skill.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
