@@ -1,6 +1,6 @@
 ---
 name: watch-vault
-description: Arm a background Monitor that watches an Obsidian vault scope for comment activity AND note-level frontmatter actions (e.g. annotated: review / summarize / translate) via the Annotated plugin's hosted endpoint, then act on each event through MCP tools — reply/edit/resolve for comments; do-the-work-then-write-a-receipt for frontmatter actions. Non-blocking — the conversation stays free between events. Use when the user wants comments or frontmatter workflows watched/handled while working on other things, or says "watch my vault" / "watch my vault comments".
+description: Watch an Obsidian vault (Annotated plugin) for comment threads and frontmatter actions, handling each in the background — non-blocking. Use for "watch my vault" / "watch my vault comments".
 argument-hint: [vault-folder-scope]
 ---
 
