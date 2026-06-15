@@ -8,7 +8,7 @@ repos:
 ---
 # PLN — Note Provenance & Tags
 
-> **Implementation status (2026-06-13): built behind v0.1.6, pending deploy + live verification.** Steps 1–4 implemented and tested: list-aware `update_frontmatter`, `stampProvenance` wired into all MCP write tools (gated on identity, git-style `name <id>`, write-once `created`), the `ProvenanceStamper` editor hooks for UI edits (loop-guarded), and the synced `tagPrefix` setting + the server-enforced `tag_note` tool (the server prepends the prefix; the agent passes bare tags and cannot escape the namespace) + skill tag policy. Step 5 (live verification) waits on deploying the current build.
+> **Implementation status: shipped in v0.1.6 (provenance) / v0.1.7 (server-enforced `tag_note`); live verification is a per-deploy runtime check.** Steps 1–4 implemented and tested: list-aware `update_frontmatter`, `stampProvenance` wired into all MCP write tools (gated on identity, git-style `name <id>`, write-once `created`), the `ProvenanceStamper` editor hooks for UI edits (loop-guarded), and the synced `tagPrefix` setting + the server-enforced `tag_note` tool (the server prepends the prefix; the agent passes bare tags and cannot escape the namespace) + skill tag policy. Step 5 (live verification) waits on deploying the current build.
 
 > Stamp general provenance (`created`/`createdBy`/`updated`/`updatedBy`) onto notes as a side effect of writing them, and let the agent maintain content-derived tags under a reserved namespace. Distinct from [[PLN - Frontmatter & File Watch]] (the *watch channel* / action vocabulary) but shares its `update_frontmatter` tool and editor-hook plumbing — so it depends on that plan's tool landing first.
 

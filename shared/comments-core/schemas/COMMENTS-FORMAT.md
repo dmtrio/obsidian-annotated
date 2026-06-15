@@ -2,7 +2,7 @@
 
 Every Markdown note can have a sibling comment file. For `notes/todo.md`, the comment file is `notes/todo.md.comments.json`.
 
-Validated by [`comments.schema.json`](./comments.schema.json).
+Validated by [`comments.schema.json`](./comments.schema.json). This is the **cross-tool contract**: any writer — the Obsidian plugin or an external MCP server — must produce files that validate against the schema, so comments written by one tool are readable by another.
 
 ---
 
@@ -11,7 +11,7 @@ Validated by [`comments.schema.json`](./comments.schema.json).
 ```
 {
   "version":    1,                             ── schema version (integer)
-  "createdBy":  "obsidian-annotated@0.1.0",    ── plugin version that created this file
+  "createdBy":  "obsidian-annotated@0.1.7",    ── plugin/tool + version that created this file
   "note_path":  "notes/todo.md",               ── vault-relative path of the annotated note
   "created_at": "2025-01-15T10:00:00.000Z",    ── when this file was first created
   "updated_at": "2025-01-15T12:30:00.000Z",    ── last write timestamp (auto-updated)
@@ -37,7 +37,7 @@ When a user selects text on line 5 of `todo.md` and submits "This needs a test":
 ```json
 {
   "version": 1,
-  "createdBy": "obsidian-annotated@0.1.0",
+  "createdBy": "obsidian-annotated@0.1.7",
   "note_path": "notes/todo.md",
   "created_at": "2025-01-15T10:00:00.000Z",
   "updated_at": "2025-01-15T10:00:00.000Z",
@@ -45,6 +45,7 @@ When a user selects text on line 5 of `todo.md` and submits "This needs a test":
     {
       "id": "c_m1abc2def3",
       "author": "alice",
+      "author_id": "i_a1b2c3d4",
       "created_at": "2025-01-15T10:00:00.000Z",
       "updated_at": "2025-01-15T10:00:00.000Z",
       "location": {
@@ -71,9 +72,20 @@ When a user selects text on line 5 of `todo.md` and submits "This needs a test":
 ```
 
 Key behaviors:
-- `content_snippet` captures the first 50 chars of line 5. On next open, the plugin uses this to relocate the comment if lines shifted.
+- `content_snippet` captures the first 50 chars of line 5. On next open, the plugin uses this to relocate the comment if lines shifted (see [Comment Relocation](#comment-relocation)); if it can't be relocated, `is_stale: true` is set.
 - `last_activity_at` equals `created_at` since there are no replies yet.
 - `metadata` is recalculated on every save — never edit it by hand.
+
+---
+
+## Identity & attribution
+
+`author` is the writer's display name at write time. When a comment, reply, or resolution is written by a **key-authenticated** writer (an agent through the MCP server), the matching id field is also stamped:
+
+- `author_id` on a comment or reply,
+- `resolved_by_id` on a resolution.
+
+These carry the key's stable **identity id** (e.g. `i_a1b2c3d4`) — git-style: a readable name plus an id that survives renames and disambiguates same-named identities. Comments written by hand in the Obsidian UI may have only `author`. Treat `*_id` as the durable attribution key; `author`/`resolved_by` are display labels.
 
 ---
 
@@ -87,6 +99,7 @@ When Bob replies "I'll add one":
 {
   "id": "c_m1abc2def3",
   "author": "alice",
+  "author_id": "i_a1b2c3d4",
   "created_at": "2025-01-15T10:00:00.000Z",
   "updated_at": "2025-01-15T10:05:00.000Z",
   "location": { "type": "range", "start_line": 5, "start_char": 0, "end_line": 5, "end_char": 0 },
@@ -96,6 +109,7 @@ When Bob replies "I'll add one":
     {
       "id": "c_m1xyz9abc1",
       "author": "bob",
+      "author_id": "i_b0b0b0b0",
       "created_at": "2025-01-15T10:05:00.000Z",
       "updated_at": "2025-01-15T10:05:00.000Z",
       "content": "I'll add one",
@@ -121,11 +135,12 @@ When Alice resolves the thread:
 {
   "status": "resolved",
   "resolved_at": "2025-01-15T11:00:00.000Z",
-  "resolved_by": "alice"
+  "resolved_by": "alice",
+  "resolved_by_id": "i_a1b2c3d4"
 }
 ```
 
-If someone adds a new reply to a resolved comment, it automatically reopens: `status` reverts to `"open"` and `resolved_at`/`resolved_by` are cleared.
+If someone adds a new reply to a resolved comment, it automatically reopens: `status` reverts to `"open"` and `resolved_at`/`resolved_by`/`resolved_by_id` are cleared.
 
 ---
 
@@ -155,3 +170,4 @@ When the note is edited and lines shift, the plugin uses `content_snippet` to fi
 - Single-line comment: `start_line === end_line`
 - Full-line annotation (no sub-selection): `start_char` and `end_char` are both `0`
 - The `type` field exists to allow future location types (e.g., block references) without breaking the schema.
+</content>
