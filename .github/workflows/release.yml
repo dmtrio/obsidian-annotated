@@ -1,0 +1,46 @@
+name: Release
+
+# Obsidian installs a plugin from its GitHub Release assets. The release tag
+# MUST equal the manifest version exactly (no "v" prefix), e.g. `0.2.0`.
+# Cut a release by pushing a matching tag:
+#   git tag 0.2.0 && git push origin 0.2.0
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+
+      - name: Verify tag matches manifest version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} != manifest.json version ${MANIFEST_VERSION}" >&2
+            exit 1
+          fi
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Create GitHub Release with plugin assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "See [CHANGELOG.md](CHANGELOG.md)." \
+            main.js manifest.json styles.css
