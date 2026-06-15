@@ -51,9 +51,8 @@ export const strings = {
 		},
 		skills: {
 			heading: "Agent skills",
-			desc: "Skill files for Claude, bundled with the plugin. Open the folder, then copy a skill into ~/.claude/skills/ (Claude Code) or zip it to upload on claude.ai.",
-			openButton: "Open skills folder",
-			wrote: (path: string) => `Skills ready at ${path}`,
+			desc: "Skills that let Claude review and watch your vault. Get them on GitHub, then copy a skill into ~/.claude/skills/ (Claude Code) or zip the folder to upload on claude.ai.",
+			openButton: "Get skills on GitHub",
 		},
 		defaultAuthor: {
 			name: "Your identity",

@@ -54,13 +54,6 @@ const context = await esbuild.context({
 	define: {
 		BUILD_OAUTH: JSON.stringify(includeOAuth),
 	},
-	// Embed skill files as strings so the plugin can write them to disk for the
-	// user (plugin/skills-bundle.ts + Settings → Agent skills).
-	loader: {
-		".md": "text",
-		".yml": "text",
-		".sh": "text",
-	},
 	format: "cjs",
 	// es2020: the OAuth gate's dependency tree contains BigInt literals
 	// (es2018-incompatible); Obsidian 1.5+ Electron handles es2020 fine.
