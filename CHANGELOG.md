@@ -2,7 +2,7 @@
 
 Notable changes to Annotated. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). For current behaviour see the [README](README.md); for design rationale see [`docs/`](docs/).
 
-## [Unreleased] — branch `feat/vault-tools-key-tiers`
+## [0.2.0] — 2026-06-15
 
 ### Added
 - **Capability tiers** — access keys are an ordered ladder `poll < additive < destructive` (replacing the binary full/watch model). Each MCP tool declares a minimum tier and is gated by conditional registration, so a key never sees a tool above its tier. Settings mints with two buttons — *Create Read/Write* (`poll`+`additive`) and *Create Read/Write + Move/Delete* (`poll`+`destructive`) — each a pair sharing one identity.
