@@ -25,8 +25,8 @@ The server **core** (`AnnotatedMcpServer`, `OAuthGate`) imports no `obsidian` an
 
 ## Install
 
-- **Manual:** build (below), then copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/obsidian-annotated/` and enable it in Settings → Community plugins.
-- **From source:** `npm install && npm run build` (writes `main.js`). `npm run dist` also stages the loadable bundle under `dist/obsidian-annotated/`.
+- **Manual:** build (below), then copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/annotated/` and enable it in Settings → Community plugins.
+- **From source:** `npm install && npm run build` (writes `main.js`).
 
 Requires Obsidian ≥ 1.5.0. Works on desktop and mobile (the MCP server is desktop-only).
 
@@ -108,7 +108,6 @@ Comments are stored in `*.comments.json` next to each note. The format is the cr
 | `npm run dev` | esbuild watch (inline sourcemaps) |
 | `npm run build` | production bundle → `main.js` |
 | `npm run build:lite` | production bundle with the OAuth gate tree-shaken out (community-store artifact) |
-| `npm run dist` | build + stage `main.js`/`manifest.json`/`styles.css` under `dist/obsidian-annotated/` |
 | `npm test` | Vitest (`tests/` + `shared/*/tests/`) |
 | `npm run skill:zip` / `:review` | package a skill into `dist/<skill>.zip` |
 

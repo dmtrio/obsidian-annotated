@@ -14,9 +14,9 @@
     },
     "createdBy": {
       "type": "string",
-      "pattern": "^obsidian-annotated@",
-      "description": "Identifier of the plugin version that created this file, in the format 'obsidian-annotated@<semver>'. Used for debugging and future migration logic.",
-      "examples": ["obsidian-annotated@0.1.0"]
+      "pattern": "^(obsidian-annotated|annotated)@",
+      "description": "Identifier of the tool + version that created this file, in the format 'annotated@<semver>' (legacy files use 'obsidian-annotated@<semver>'). Used for debugging and future migration logic.",
+      "examples": ["annotated@0.2.0", "obsidian-annotated@0.1.0"]
     },
     "note_path": {
       "type": "string",
