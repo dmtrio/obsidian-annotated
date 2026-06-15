@@ -2,7 +2,7 @@ import { Comment, CommentFile, CommentReply, SCHEMA_VERSION } from "./types";
 import { CommentStorageAdapter } from "./storage";
 
 export interface CommentStoreOptions {
-	/** Stamped into new comment files, e.g. "obsidian-annotated@0.1.1". */
+	/** Stamped into new comment files, e.g. "annotated@0.2.0". */
 	createdBy: string;
 	/** Called on read/parse failures (the store returns null in that case). */
 	onError?: (message: string, cause: unknown) => void;

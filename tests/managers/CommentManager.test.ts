@@ -39,7 +39,7 @@ describe("CommentManager", () => {
       expect(file.comments[0].id).toBe(comment.id);
       expect(file.note_path).toBe("note.md");
       expect(file.version).toBe(SCHEMA_VERSION);
-      expect(file.createdBy).toBe("obsidian-annotated@0.1.0");
+      expect(file.createdBy).toBe("annotated@0.1.0");
     });
 
     it("appends to existing comment file", async () => {

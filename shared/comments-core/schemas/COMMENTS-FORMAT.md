@@ -11,7 +11,7 @@ Validated by [`comments.schema.json`](./comments.schema.json). This is the **cro
 ```
 {
   "version":    1,                             ── schema version (integer)
-  "createdBy":  "obsidian-annotated@0.1.7",    ── plugin/tool + version that created this file
+  "createdBy":  "annotated@0.2.0",    ── plugin/tool + version that created this file
   "note_path":  "notes/todo.md",               ── vault-relative path of the annotated note
   "created_at": "2025-01-15T10:00:00.000Z",    ── when this file was first created
   "updated_at": "2025-01-15T12:30:00.000Z",    ── last write timestamp (auto-updated)
@@ -37,7 +37,7 @@ When a user selects text on line 5 of `todo.md` and submits "This needs a test":
 ```json
 {
   "version": 1,
-  "createdBy": "obsidian-annotated@0.1.7",
+  "createdBy": "annotated@0.2.0",
   "note_path": "notes/todo.md",
   "created_at": "2025-01-15T10:00:00.000Z",
   "updated_at": "2025-01-15T10:00:00.000Z",

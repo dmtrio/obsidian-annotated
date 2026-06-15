@@ -423,7 +423,7 @@ export default class AnnotatedPlugin extends Plugin {
 
   /** Current add-comment binding (custom or default), formatted for display. */
   getAddCommentHotkeyLabel(): string | null {
-    const commandId = "obsidian-annotated:add-comment";
+    const commandId = "annotated:add-comment";
     const hm = (this.app as unknown as {
       hotkeyManager?: {
         getHotkeys?: (id: string) => Array<{ modifiers: string[]; key: string }> | null;

@@ -25,7 +25,7 @@ export class CommentManager {
 			write: (path, data) => vault.adapter.write(path, data),
 		};
 		this.store = new CommentStore(storage, {
-			createdBy: `obsidian-annotated@${pluginVersion}`,
+			createdBy: `annotated@${pluginVersion}`,
 			onError: (message, cause) => {
 				console.error(message, cause);
 				new Notice("Failed to parse comments file");

@@ -345,7 +345,7 @@ export class AnnotatedMcpServer {
 
 	private buildMcpServer(identity: Identity, key: KeyRecord): McpServer {
 		const mcp = new McpServer({
-			name: "obsidian-annotated",
+			name: "annotated",
 			version: this.deps.info.pluginVersion,
 		});
 		const { store, notes, provenance } = this.deps;
