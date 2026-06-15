@@ -49,6 +49,12 @@ export const strings = {
 			revoked: "Key pair revoked",
 			orphanedKey: "identity missing — key is invalid",
 		},
+		skills: {
+			heading: "Agent skills",
+			desc: "Skill files for Claude. Write them into this plugin's folder and open it, then copy a skill into ~/.claude/skills/ (Claude Code) or zip the folder to upload on claude.ai.",
+			openButton: "Write & open skills folder",
+			wrote: (path: string) => `Skills written to ${path}`,
+		},
 		defaultAuthor: {
 			name: "Your identity",
 			desc: "Who comments from this device are authored as. Identities are managed below and sync with the vault; this selection stays on this device.",

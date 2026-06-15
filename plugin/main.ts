@@ -1,6 +1,7 @@
 import {
   App,
   Editor,
+  FileSystemAdapter,
   MarkdownView,
   Menu,
   Notice,
@@ -55,6 +56,7 @@ import {
   tierLabel,
 } from "../server/PluginMcpHost";
 import { ProvenanceStamper } from "./ProvenanceStamper";
+import { SKILL_FILES } from "./skills-bundle";
 
 export default class AnnotatedPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
@@ -1172,6 +1174,7 @@ class AnnotatedSettingTab extends PluginSettingTab {
     this.displayIdentitySection(containerEl);
     if (Platform.isDesktop) {
       this.displayMcpSection(containerEl);
+      this.displaySkillsSection(containerEl);
     }
   }
 
@@ -1456,6 +1459,65 @@ class AnnotatedSettingTab extends PluginSettingTab {
         cls: ["setting-item-description", "annotated-section-desc"],
       });
     }
+  }
+
+  // ── Agent skills (write bundled skill files to disk + reveal) ──────
+  private displaySkillsSection(containerEl: HTMLElement): void {
+    containerEl.createEl("h3", { text: strings.settings.skills.heading });
+    new Setting(containerEl)
+      .setDesc(strings.settings.skills.desc)
+      .addButton((btn) =>
+        btn
+          .setButtonText(strings.settings.skills.openButton)
+          .setCta()
+          .onClick(() => void this.openSkillsFolder()),
+      );
+  }
+
+  private async writeSkills(): Promise<string> {
+    const adapter = this.app.vault.adapter;
+    const pluginDir =
+      this.plugin.manifest.dir ??
+      `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
+    const base = `${pluginDir}/skills`;
+    const ensureDir = async (dir: string) => {
+      let cur = "";
+      for (const part of dir.split("/")) {
+        cur = cur ? `${cur}/${part}` : part;
+        if (!(await adapter.exists(cur))) await adapter.mkdir(cur);
+      }
+    };
+    for (const [name, files] of Object.entries(SKILL_FILES)) {
+      for (const [rel, content] of Object.entries(files)) {
+        const path = `${base}/${name}/${rel}`;
+        await ensureDir(path.slice(0, path.lastIndexOf("/")));
+        await adapter.write(path, content);
+      }
+    }
+    return base;
+  }
+
+  private async openSkillsFolder(): Promise<void> {
+    let base: string;
+    try {
+      base = await this.writeSkills();
+    } catch (e) {
+      new Notice(`Failed to write skills: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const adapter = this.app.vault.adapter;
+    const full = adapter instanceof FileSystemAdapter ? adapter.getFullPath(base) : base;
+    try {
+      const electron = (
+        window as unknown as {
+          require?: (m: string) => { shell?: { openPath?: (p: string) => unknown } };
+        }
+      ).require?.("electron");
+      if (electron?.shell?.openPath) await electron.shell.openPath(full);
+    } catch {
+      /* reveal is best-effort — the notice still tells the user where the files are */
+    }
+    new Notice(strings.settings.skills.wrote(full));
   }
 
   private refreshActiveGutter(): void {
