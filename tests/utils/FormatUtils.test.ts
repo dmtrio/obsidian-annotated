@@ -4,8 +4,8 @@ import {
   formatLocationText,
   getCommentActivityTime,
   truncateContent,
-} from "../../src/utils/FormatUtils";
-import { Comment } from "../../src/types";
+} from "../../plugin/utils/FormatUtils";
+import { Comment } from "../../plugin/types";
 
 describe("formatLocationText", () => {
   it("returns 'Line X' when start equals end", () => {

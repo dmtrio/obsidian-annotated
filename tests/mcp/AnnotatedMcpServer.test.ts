@@ -11,10 +11,11 @@ import {
 	CommentStore,
 	InMemoryStorageAdapter,
 	hashToken,
+	readFrontmatter,
 	type Identity,
 	type KeyRecord,
 } from "@annotated/comments-core";
-import { AnnotatedMcpServer, type NoteAccess } from "../../src/mcp/AnnotatedMcpServer";
+import { AnnotatedMcpServer, type NoteAccess } from "../../server/AnnotatedMcpServer";
 
 const PORT = 27981;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -32,18 +33,72 @@ function buildNotes(): NoteAccess {
 		["inbox/other.md", "# Other\n\nfoo bar foo\n"],
 	]);
 	return {
-		exists: async (p) => notesStore.has(p),
+		exists: async (p) => notesStore.has(p) || storage.files.has(p),
 		read: async (p) => {
 			const c = notesStore.get(p);
-			if (c === undefined) throw new Error(`ENOENT ${p}`);
+			if (c === undefined) {
+				const sc = storage.files.get(p);
+				if (sc === undefined) throw new Error(`ENOENT ${p}`);
+				return sc;
+			}
 			return c;
 		},
-		write: async (p, content) => void notesStore.set(p, content),
+		write: async (p, content) => {
+			if (p.endsWith(".comments.json")) {
+				storage.files.set(p, content);
+			} else {
+				notesStore.set(p, content);
+			}
+		},
+		mkdir: async () => {},
 		listCommentedNotePaths: async () => {
 			const suffix = ".comments.json";
 			return [...storage.files.keys()]
 				.filter((p) => p.endsWith(suffix))
 				.map((p) => p.slice(0, -suffix.length));
+		},
+		listPaths: async () => [...notesStore.keys()].filter((p) => p.endsWith(".md")),
+		listFrontmatter: async () => {
+			const result = [];
+			for (const [path, content] of notesStore) {
+				if (!path.endsWith(".md")) continue;
+				const parsed = readFrontmatter(content);
+				result.push({
+					path,
+					frontmatter: parsed.scalars,
+				});
+			}
+			return result;
+		},
+		search: async (query, scopes, opts) => {
+			const q = query.toLowerCase();
+			const inScope = (p: string) => (!scopes ? true : scopes.some((s) => p === s || p.startsWith(s + "/")));
+			const hits: Array<{ path: string; line: number; excerpt: string; score: number }> = [];
+			for (const [path, content] of notesStore) {
+				if (!path.endsWith(".md") || !inScope(path)) continue;
+				const idx = content.toLowerCase().indexOf(q);
+				if (idx === -1) continue;
+				const line = content.slice(0, idx).split("\n").length;
+				hits.push({ path, line, excerpt: content.slice(idx, idx + 40).replace(/\s+/g, " ").trim(), score: 1 });
+			}
+			return hits.slice(0, opts?.limit ?? 20);
+		},
+		move: async (oldPath, newPath) => {
+			if (!notesStore.has(oldPath)) throw new Error(`ENOENT ${oldPath}`);
+			notesStore.set(newPath, notesStore.get(oldPath)!);
+			notesStore.delete(oldPath);
+			const oldSc = oldPath + ".comments.json";
+			const newSc = newPath + ".comments.json";
+			if (storage.files.has(oldSc)) {
+				const cf = JSON.parse(storage.files.get(oldSc)!);
+				cf.note_path = newPath;
+				storage.files.set(newSc, JSON.stringify(cf, null, 2));
+				storage.files.delete(oldSc);
+			}
+		},
+		trash: async (p) => {
+			notesStore.delete(p);
+			storage.files.delete(p);
 		},
 	};
 }
@@ -77,6 +132,8 @@ beforeAll(async () => {
 			scope: "full",
 			pathScope: ["fenced-zone"],
 		},
+		{ tokenHash: await hashToken("claude-destructive"), identityId: "i_claude", scope: "destructive" },
+		{ tokenHash: await hashToken("fenced-destructive"), identityId: "i_claude", scope: "destructive", pathScope: ["fenced-zone"] },
 	];
 	server = new AnnotatedMcpServer(
 		{
@@ -84,6 +141,7 @@ beforeAll(async () => {
 			notes: buildNotes(),
 			auth: { getIdentities: () => [deme, claude], getKeys: () => keys },
 			info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+			getTagPrefix: () => "bot/",
 		},
 		{ port: PORT, host: "127.0.0.1" },
 	);
@@ -108,7 +166,6 @@ describe("HTTP auth matrix", () => {
 		["/comments/actionable", "claude-watch", 200],
 		["/comments/actionable", "claude-full", 200],
 		["/mcp", null, 401],
-		["/mcp", "claude-watch", 403],
 	];
 	for (const [path, token, expected] of cases) {
 		it(`GET ${path} with ${token ?? "no key"} → ${expected}`, async () => {
@@ -124,6 +181,70 @@ describe("HTTP auth matrix", () => {
 			headers: { Authorization: "Bearer claude-full" },
 		});
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("tier-gated tool registration", () => {
+	it("poll tier client can access read tools but not write tools", async () => {
+		const client = await mcpClient("claude-watch");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+
+		// Poll tier tools should be present
+		expect(toolNames).toContain("read_note");
+		expect(toolNames).toContain("read_comments");
+		expect(toolNames).toContain("check_comments");
+		expect(toolNames).toContain("check_frontmatter");
+		expect(toolNames).toContain("list_commented_notes");
+
+		// Additive tier tools should NOT be present
+		expect(toolNames).not.toContain("add_comment");
+		expect(toolNames).not.toContain("patch_note");
+		expect(toolNames).not.toContain("create_note");
+		expect(toolNames).not.toContain("append_note");
+		expect(toolNames).not.toContain("update_frontmatter");
+		expect(toolNames).not.toContain("reply_to_comment");
+		expect(toolNames).not.toContain("resolve_comment");
+		expect(toolNames).not.toContain("tag_note");
+
+		// Destructive tier tools should NOT be present either
+		expect(toolNames).not.toContain("move_note");
+		expect(toolNames).not.toContain("delete_note");
+
+		await client.close();
+	});
+
+	it("additive tier client can access read and write tools", async () => {
+		const client = await mcpClient("claude-full");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+
+		// Poll tier tools should be present
+		expect(toolNames).toContain("read_note");
+		expect(toolNames).toContain("read_comments");
+		expect(toolNames).toContain("check_comments");
+
+		// Additive tier tools should be present
+		expect(toolNames).toContain("add_comment");
+		expect(toolNames).toContain("patch_note");
+		expect(toolNames).toContain("create_note");
+		expect(toolNames).toContain("append_note");
+		expect(toolNames).toContain("update_frontmatter");
+		expect(toolNames).toContain("tag_note");
+		expect(toolNames).toContain("reply_to_comment");
+		expect(toolNames).toContain("resolve_comment");
+
+		await client.close();
+	});
+
+	it("calling a write tool with a poll client returns an error", async () => {
+		const client = await mcpClient("claude-watch");
+		const result = await client.callTool({
+			name: "add_comment",
+			arguments: { path: "inbox/idea.md", content: "x", startLine: 1, endLine: 1 },
+		});
+		expect(result.isError).toBe(true);
+		await client.close();
 	});
 });
 
@@ -258,6 +379,67 @@ describe("folder fence enforcement", () => {
 	});
 });
 
+describe("frontmatter watch surface", () => {
+	it("GET /frontmatter/actionable with watch key returns refs matching trigger", async () => {
+		// Seed notes with frontmatter
+		notesStore.set("watch/a.md", "---\nannotated: review\n---\n# A\n");
+		notesStore.set("watch/b.md", "---\nannotated: reviewed\n---\n# B\n");
+
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch&triggers=review`, {
+			headers: { Authorization: "Bearer claude-watch" },
+		});
+		expect(res.status).toBe(200);
+		const refs = await res.json();
+		expect(refs).toHaveLength(1);
+		expect(refs[0]).toEqual({
+			note_path: "watch/a.md",
+			field: "annotated",
+			value: "review",
+			root: "review",
+			arg: null,
+		});
+	});
+
+	it("check_frontmatter MCP tool with triggers and scope", async () => {
+		notesStore.set("watch/c.md", "---\nannotated: review\n---\n# C\n");
+
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "check_frontmatter", {
+			triggers: ["review"],
+			path: "watch",
+		});
+		expect(body).toHaveLength(2);
+		expect(body[0].note_path).toBe("watch/a.md");
+		expect(body[1].note_path).toBe("watch/c.md");
+		await client.close();
+	});
+
+	it("compound frontmatter value with arg", async () => {
+		notesStore.set("watch/d.md", "---\nannotated: translate/spanish\n---\n# D\n");
+
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch&triggers=translate`, {
+			headers: { Authorization: "Bearer claude-watch" },
+		});
+		const refs = await res.json();
+		expect(refs).toHaveLength(1);
+		expect(refs[0]).toEqual({
+			note_path: "watch/d.md",
+			field: "annotated",
+			value: "translate/spanish",
+			root: "translate",
+			arg: "spanish",
+		});
+	});
+
+	it("fenced key requesting out-of-fence scope is refused", async () => {
+		const res = await fetch(`${BASE}/frontmatter/actionable?scope=watch`, {
+			headers: { Authorization: "Bearer fenced" },
+		});
+		expect(res.status).toBe(403);
+	});
+
+});
+
 describe("note tools", () => {
 	it("read_note returns raw content", async () => {
 		const client = await mcpClient("claude-full");
@@ -307,4 +489,926 @@ describe("note tools", () => {
 		expect(result.isError).toBe(true);
 		await client.close();
 	});
+
+	it("create_note creates a new markdown note (with parent folder) and nothing else", async () => {
+		const client = await mcpClient("claude-full");
+		const created = await callTool(client, "create_note", {
+			path: "plans/PLN - New Thing.md",
+			content: "---\nstatus: draft\n---\n# PLN\n",
+		});
+		expect(created.body).toEqual({ ok: true, path: "plans/PLN - New Thing.md" });
+		expect(notesStore.get("plans/PLN - New Thing.md")).toContain("status: draft");
+
+		// Never overwrites — existing notes are patch_note territory
+		const dup = await callTool(client, "create_note", { path: "inbox/idea.md", content: "x" });
+		expect(dup.result.isError).toBe(true);
+		expect(notesStore.get("inbox/idea.md")).toContain("# Idea");
+
+		// Markdown only — no sidecars, configs, or traversal
+		const sidecar = await callTool(client, "create_note", {
+			path: "inbox/x.comments.json",
+			content: "{}",
+		});
+		expect(sidecar.result.isError).toBe(true);
+		const traversal = await callTool(client, "create_note", {
+			path: "../outside.md",
+			content: "x",
+		});
+		expect(traversal.result.isError).toBe(true);
+
+		await client.close();
+	});
+
+	it("patch_note falls back to punctuation folding when the exact match misses", async () => {
+		const client = await mcpClient("claude-full");
+		// Note holds an em-dash title; caller patches with a plain hyphen.
+		notesStore.set("inbox/title.md", "# PLN — MCP OAuth Shim\n\nbody\n");
+		const r = await callTool(client, "patch_note", {
+			path: "inbox/title.md",
+			oldString: "# PLN - MCP OAuth Shim",
+			newString: "# PLN — MCP OAuth Shim (done)",
+		});
+		expect(r.body).toEqual({ ok: true, replacements: 1, viaNormalization: true });
+		// The replacement landed on the real span — em-dash original is gone,
+		// replaced by exactly what we asked for, body untouched.
+		expect(notesStore.get("inbox/title.md")).toBe(
+			"# PLN — MCP OAuth Shim (done)\n\nbody\n",
+		);
+		await client.close();
+	});
+
+	it("patch_note prefers an exact match over a folded one and stays loud on real misses", async () => {
+		const client = await mcpClient("claude-full");
+		notesStore.set("inbox/q.md", "straight 'quote' here\n");
+		// Exact match present → no normalization flag in the result.
+		const exact = await callTool(client, "patch_note", {
+			path: "inbox/q.md",
+			oldString: "'quote'",
+			newString: "'word'",
+		});
+		expect(exact.body).toEqual({ ok: true, replacements: 1 });
+		// Genuinely absent text still errors, fold or no fold.
+		const miss = await callTool(client, "patch_note", {
+			path: "inbox/q.md",
+			oldString: "nowhere",
+			newString: "x",
+		});
+		expect(miss.result.isError).toBe(true);
+		await client.close();
+	});
+
+	it("append_note adds to the end with a blank-line seam and never overwrites", async () => {
+		const client = await mcpClient("claude-full");
+		const before = notesStore.get("inbox/idea.md");
+
+		const r1 = await callTool(client, "append_note", {
+			path: "inbox/idea.md",
+			content: "## LOG\n\nfirst entry\n",
+		});
+		expect(r1.body.ok).toBe(true);
+		const after1 = notesStore.get("inbox/idea.md")!;
+		// Original content is byte-preserved as a prefix
+		expect(after1.startsWith(before!)).toBe(true);
+		expect(after1).toContain("## LOG");
+		// Exactly one blank line at the seam (no run-on, no pile-up)
+		expect(after1).toContain("the thing.\n\n## LOG");
+
+		// A second append stacks cleanly with one blank line, not three
+		await callTool(client, "append_note", {
+			path: "inbox/idea.md",
+			content: "second entry\n",
+		});
+		const after2 = notesStore.get("inbox/idea.md")!;
+		expect(after2).toContain("first entry\n\nsecond entry");
+
+		// Missing note errors (append modifies, never creates)
+		const missing = await callTool(client, "append_note", {
+			path: "inbox/nope.md",
+			content: "x",
+		});
+		expect(missing.result.isError).toBe(true);
+		await client.close();
+	});
+
+	it("append_note respects the folder fence", async () => {
+		const client = await mcpClient("fenced");
+		const { result } = await callTool(client, "append_note", {
+			path: "inbox/other.md",
+			content: "x",
+		});
+		expect(result.isError).toBe(true);
+		await client.close();
+	});
+
+	it("create_note respects the folder fence", async () => {
+		const client = await mcpClient("fenced");
+		const { result } = await callTool(client, "create_note", {
+			path: "inbox/new.md",
+			content: "x",
+		});
+		expect(result.isError).toBe(true);
+		expect(notesStore.has("inbox/new.md")).toBe(false);
+		await client.close();
+	});
+
+	describe("update_frontmatter", () => {
+		it("set adds or updates a scalar field", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				set: { priority: "high" },
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			// Verify the field was added and other fields+body unchanged
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("priority: high");
+			expect(read.body.content).toContain("status: draft");
+			expect(read.body.content).toContain("# Idea");
+			expect(read.body.content).toContain("body");
+
+			await client.close();
+		});
+
+		it("unset removes a field", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\npriority: high\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				unset: ["status"],
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			// Verify the field was removed but others remain
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).not.toContain("status: draft");
+			expect(read.body.content).toContain("priority: high");
+			expect(read.body.content).toContain("# Idea");
+
+			await client.close();
+		});
+
+		it("listAdd adds a tag without duplication", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\ntags: [planning]\n---\n# Idea\n\nbody\n");
+
+			// Add a new tag
+			const r1 = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listAdd: { field: "tags", items: ["review"] },
+			});
+			expect(r1.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			let read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("tags:");
+			expect(read.body.content).toContain("planning");
+			expect(read.body.content).toContain("review");
+
+			// Add an existing tag (should not duplicate)
+			const r2 = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listAdd: { field: "tags", items: ["planning"] },
+			});
+			expect(r2.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			const content = read.body.content;
+			// Count occurrences of "planning" in the frontmatter (before the closing ---)
+			const fmEnd = content.indexOf("---\n# Idea");
+			const fm = content.slice(0, fmEnd);
+			const planningCount = (fm.match(/planning/g) || []).length;
+			expect(planningCount).toBe(1); // No duplication
+
+			await client.close();
+		});
+
+		it("listRemove removes a tag", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\ntags: [planning, review, done]\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				listRemove: { field: "tags", items: ["review"] },
+			});
+			expect(r.body).toEqual({ ok: true, path: "inbox/idea.md" });
+
+			const read = await callTool(client, "read_note", { path: "inbox/idea.md" });
+			expect(read.body.content).toContain("planning");
+			expect(read.body.content).not.toContain("review");
+			expect(read.body.content).toContain("done");
+
+			await client.close();
+		});
+
+		it("fenced key errors when targeting a path outside its fence", async () => {
+			const client = await mcpClient("fenced");
+			// The fenced token is scoped to "fenced-zone" folder (from the test setup)
+			// inbox/idea.md is outside that scope
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+				set: { priority: "high" },
+			});
+			expect(r.result.isError).toBe(true);
+
+			// Verify the note was not modified
+			const content = notesStore.get("inbox/idea.md")!;
+			expect(content).not.toContain("priority: high");
+			expect(content).toContain("status: draft");
+
+			await client.close();
+		});
+
+		it("errors when the note does not exist", async () => {
+			const client = await mcpClient("claude-full");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/nonexistent.md",
+				set: { status: "archived" },
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+
+		it("errors when no operations are provided", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("inbox/idea.md", "---\nstatus: draft\n---\n# Idea\n\nbody\n");
+
+			const r = await callTool(client, "update_frontmatter", {
+				path: "inbox/idea.md",
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+	});
+
+	describe("tag_note", () => {
+		it("add: [\"draft\"] on a note with no tags → note has bot/draft, response shows added: [\"bot/draft\"]", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/a.md", "# A\n\nBody\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/a.md",
+				add: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.added).toEqual(["bot/draft"]);
+
+			const read = await callTool(client, "read_note", { path: "t/a.md" });
+			expect(read.body.content).toContain("tags:");
+			expect(read.body.content).toContain("bot/draft");
+
+			await client.close();
+		});
+
+		it("user's existing tags are untouched when adding prefixed tags", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/u.md", "---\ntags: [mcp, claude-code]\n---\n# U\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/u.md",
+				add: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+
+			const read = await callTool(client, "read_note", { path: "t/u.md" });
+			const content = read.body.content;
+			// All three tags should be present
+			expect(content).toContain("mcp");
+			expect(content).toContain("claude-code");
+			expect(content).toContain("bot/draft");
+
+			await client.close();
+		});
+
+		it("idempotent prefix: add: [\"bot/already\"] → writes bot/already, NOT bot/bot/already", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/id.md", "# Idempotent\n\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/id.md",
+				add: ["bot/already"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.added).toEqual(["bot/already"]);
+
+			const read = await callTool(client, "read_note", { path: "t/id.md" });
+			const content = read.body.content;
+			// Should contain exactly "bot/already", not "bot/bot/already"
+			expect(content).toContain("bot/already");
+			expect(content).not.toContain("bot/bot/already");
+
+			await client.close();
+		});
+
+		it("remove: [\"draft\"] on a note with bot/draft → tag removed, others intact", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/rem.md", "---\ntags: [mcp, bot/draft, other]\n---\n# Rem\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/rem.md",
+				remove: ["draft"],
+			});
+			expect(r.body.ok).toBe(true);
+			expect(r.body.removed).toEqual(["bot/draft"]);
+
+			const read = await callTool(client, "read_note", { path: "t/rem.md" });
+			const content = read.body.content;
+			expect(content).toContain("mcp");
+			expect(content).not.toContain("bot/draft");
+			expect(content).toContain("other");
+
+			await client.close();
+		});
+
+		it("fenced key calling tag_note outside its fence → error, note unchanged", async () => {
+			const client = await mcpClient("fenced");
+			notesStore.set("inbox/fence.md", "---\ntags: []\n---\n# Fence\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "inbox/fence.md",
+				add: ["test"],
+			});
+			expect(r.result.isError).toBe(true);
+
+			// Verify note was not modified
+			const content = notesStore.get("inbox/fence.md")!;
+			expect(content).not.toContain("bot/test");
+
+			await client.close();
+		});
+
+		it("no-op (neither add nor remove) → error", async () => {
+			const client = await mcpClient("claude-full");
+			notesStore.set("t/noop.md", "# NoOp\n");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/noop.md",
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+
+		it("nonexistent note → error", async () => {
+			const client = await mcpClient("claude-full");
+
+			const r = await callTool(client, "tag_note", {
+				path: "t/does-not-exist.md",
+				add: ["tag"],
+			});
+			expect(r.result.isError).toBe(true);
+
+			await client.close();
+		});
+	});
+
+	describe("destructive tools", () => {
+		it("tier visibility: destructive client sees move_note and delete_note", async () => {
+			const client = await mcpClient("claude-destructive");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).toContain("move_note");
+			expect(toolNames).toContain("delete_note");
+			await client.close();
+		});
+
+		it("tier visibility: additive client does not see destructive tools", async () => {
+			const client = await mcpClient("claude-full");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).not.toContain("move_note");
+			expect(toolNames).not.toContain("delete_note");
+			await client.close();
+		});
+
+		it("move_note relocates a note and carries its sidecar", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create a note with an additive client
+			await callTool(fullClient, "create_note", {
+				path: "inbox/movable.md",
+				content: "# Movable\n\nhello\n",
+			});
+
+			// Add a comment to it
+			await callTool(fullClient, "add_comment", {
+				path: "inbox/movable.md",
+				content: "note this",
+				startLine: 1,
+				endLine: 1,
+			});
+
+			// Verify the comment exists
+			let comments = await callTool(fullClient, "read_comments", { path: "inbox/movable.md" });
+			expect(comments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Move the note with destructive client
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/movable.md",
+				newPath: "inbox/moved.md",
+			});
+			expect(moveResult.body).toEqual({ ok: true, from: "inbox/movable.md", to: "inbox/moved.md" });
+
+			// Verify old note is gone
+			const oldRead = await callTool(fullClient, "read_note", { path: "inbox/movable.md" });
+			expect(oldRead.result.isError).toBe(true);
+
+			// Verify new note exists
+			const newRead = await callTool(fullClient, "read_note", { path: "inbox/moved.md" });
+			expect(newRead.body.content).toContain("# Movable");
+
+			// Verify comments followed the move
+			const movedComments = await callTool(fullClient, "read_comments", { path: "inbox/moved.md" });
+			expect(movedComments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Verify old sidecar has no comments
+			const oldComments = await callTool(fullClient, "read_comments", { path: "inbox/movable.md" });
+			expect(oldComments.body.comments).toEqual([]);
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("move_note rejects existing destination", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create two notes
+			await callTool(fullClient, "create_note", {
+				path: "inbox/source.md",
+				content: "# Source\n",
+			});
+			await callTool(fullClient, "create_note", {
+				path: "inbox/target.md",
+				content: "# Target\n",
+			});
+
+			// Try to move source to target (should fail)
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/source.md",
+				newPath: "inbox/target.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			// Verify both notes still exist unchanged
+			const sourceRead = await callTool(fullClient, "read_note", { path: "inbox/source.md" });
+			expect(sourceRead.body.content).toContain("# Source");
+			const targetRead = await callTool(fullClient, "read_note", { path: "inbox/target.md" });
+			expect(targetRead.body.content).toContain("# Target");
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("move_note rejects missing source", async () => {
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			const moveResult = await callTool(destructiveClient, "move_note", {
+				path: "inbox/nope.md",
+				newPath: "inbox/x.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			await destructiveClient.close();
+		});
+
+		it("delete_note trashes note and sidecar", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const destructiveClient = await mcpClient("claude-destructive");
+
+			// Create a note with a comment
+			await callTool(fullClient, "create_note", {
+				path: "inbox/deletable.md",
+				content: "# Del\n",
+			});
+			await callTool(fullClient, "add_comment", {
+				path: "inbox/deletable.md",
+				content: "delete me",
+				startLine: 1,
+				endLine: 1,
+			});
+
+			// Verify comment exists
+			let comments = await callTool(fullClient, "read_comments", { path: "inbox/deletable.md" });
+			expect(comments.body.comments.length).toBeGreaterThanOrEqual(1);
+
+			// Delete with destructive client
+			const deleteResult = await callTool(destructiveClient, "delete_note", {
+				path: "inbox/deletable.md",
+			});
+			expect(deleteResult.body).toEqual({ ok: true, path: "inbox/deletable.md" });
+
+			// Verify note is gone
+			const readResult = await callTool(fullClient, "read_note", { path: "inbox/deletable.md" });
+			expect(readResult.result.isError).toBe(true);
+
+			// Verify comments sidecar file is gone (returns empty list per contract)
+			const afterDelete = await callTool(fullClient, "read_comments", { path: "inbox/deletable.md" });
+			expect(afterDelete.body.comments).toEqual([]);
+
+			await fullClient.close();
+			await destructiveClient.close();
+		});
+
+		it("fence blocks destructive ops outside scope", async () => {
+			const fullClient = await mcpClient("claude-full");
+			const fencedDestructiveClient = await mcpClient("fenced-destructive");
+
+			// Create a note outside the fence
+			await callTool(fullClient, "create_note", {
+				path: "inbox/fence-test.md",
+				content: "# FenceTest\n",
+			});
+
+			// Try to move outside fence
+			const moveResult = await callTool(fencedDestructiveClient, "move_note", {
+				path: "inbox/fence-test.md",
+				newPath: "inbox/z.md",
+			});
+			expect(moveResult.result.isError).toBe(true);
+
+			// Try to delete outside fence
+			const deleteResult = await callTool(fencedDestructiveClient, "delete_note", {
+				path: "inbox/fence-test.md",
+			});
+			expect(deleteResult.result.isError).toBe(true);
+
+			// Verify the note still exists
+			const readResult = await callTool(fullClient, "read_note", { path: "inbox/fence-test.md" });
+			expect(readResult.body.content).toContain("# FenceTest");
+
+			await fullClient.close();
+			await fencedDestructiveClient.close();
+		});
+	});
 });
+
+describe("provenance stamping", () => {
+	const PORT_PROV = 27982;
+	const BASE_PROV = `http://127.0.0.1:${PORT_PROV}`;
+
+	let serverProv: AnnotatedMcpServer;
+	let storageProv: InMemoryStorageAdapter;
+	let notesStoreProv: Map<string, string>;
+
+	function buildNotesProv(): NoteAccess {
+		notesStoreProv = new Map();
+		return {
+			exists: async (p) => notesStoreProv.has(p),
+			read: async (p) => {
+				const c = notesStoreProv.get(p);
+				if (c === undefined) throw new Error(`ENOENT ${p}`);
+				return c;
+			},
+			write: async (p, content) => void notesStoreProv.set(p, content),
+			mkdir: async () => {},
+			listCommentedNotePaths: async () => {
+				const suffix = ".comments.json";
+				return [...storageProv.files.keys()]
+					.filter((p) => p.endsWith(suffix))
+					.map((p) => p.slice(0, -suffix.length));
+			},
+		};
+	}
+
+	async function mcpClientProv(token: string): Promise<Client> {
+		const client = new Client({ name: "test-client", version: "0.0.0" });
+		await client.connect(
+			new StreamableHTTPClientTransport(new URL(`${BASE_PROV}/mcp`), {
+				requestInit: { headers: { Authorization: `Bearer ${token}` } },
+			}),
+		);
+		return client;
+	}
+
+	beforeAll(async () => {
+		storageProv = new InMemoryStorageAdapter();
+		const storeProv = new CommentStore(storageProv, { createdBy: "test@0.0.0" });
+		const keys: KeyRecord[] = [
+			{ tokenHash: await hashToken("claude-full"), identityId: "i_claude", scope: "full" },
+		];
+		serverProv = new AnnotatedMcpServer(
+			{
+				store: storeProv,
+				notes: buildNotesProv(),
+				auth: { getIdentities: () => [claude], getKeys: () => keys },
+				info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+				provenance: { now: () => "2099-06-13" },
+			},
+			{ port: PORT_PROV, host: "127.0.0.1" },
+		);
+		await serverProv.start();
+	});
+
+	afterAll(async () => {
+		await serverProv.stop();
+	});
+
+	it("create_note stamps created, createdBy, updated, updatedBy in frontmatter", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		const created = await callTool(client, "create_note", {
+			path: "test.md",
+			content: "# Test Note\n\nBody content",
+		});
+		expect(created.body).toEqual({ ok: true, path: "test.md" });
+
+		const read = await callTool(client, "read_note", { path: "test.md" });
+		const content = read.body.content;
+
+		// Check that all four fields are present
+		expect(content).toContain("created: 2099-06-13");
+		expect(content).toContain("createdBy: Claude <i_claude>");
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Body should be preserved
+		expect(content).toContain("# Test Note");
+		expect(content).toContain("Body content");
+
+		await client.close();
+	});
+
+	it("append_note respects write-once on created fields and updates updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		// Create a note with explicit created timestamp
+		notesStoreProv.set("existing.md", "---\ncreated: 2000-01-01\ncreatedBy: Bob <bob@example.com>\n---\n# Existing\n\nOld body");
+
+		const appended = await callTool(client, "append_note", {
+			path: "existing.md",
+			content: "## New Entry\n\nAppended content",
+		});
+		expect(appended.body).toEqual({ ok: true, path: "existing.md", appended: "## New Entry\n\nAppended content".length });
+
+		const read = await callTool(client, "read_note", { path: "existing.md" });
+		const content = read.body.content;
+
+		// Created fields should remain unchanged (write-once)
+		expect(content).toContain("created: 2000-01-01");
+		expect(content).toContain("createdBy: Bob <bob@example.com>");
+
+		// Updated fields should be refreshed
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Original and appended content should both be present
+		expect(content).toContain("# Existing");
+		expect(content).toContain("Old body");
+		expect(content).toContain("## New Entry");
+		expect(content).toContain("Appended content");
+
+		await client.close();
+	});
+
+	it("update_frontmatter stamps updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		notesStoreProv.set("fields.md", "---\nstatus: draft\n---\n# Note\n\nBody");
+
+		const updated = await callTool(client, "update_frontmatter", {
+			path: "fields.md",
+			set: { priority: "high" },
+		});
+		expect(updated.body).toEqual({ ok: true, path: "fields.md" });
+
+		const read = await callTool(client, "read_note", { path: "fields.md" });
+		const content = read.body.content;
+
+		// New fields from the call
+		expect(content).toContain("priority: high");
+		expect(content).toContain("status: draft");
+
+		// Provenance stamps
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Body unchanged
+		expect(content).toContain("# Note");
+		expect(content).toContain("Body");
+
+		await client.close();
+	});
+
+	it("patch_note stamps updated/updatedBy", async () => {
+		const client = await mcpClientProv("claude-full");
+
+		notesStoreProv.set("patch.md", "---\nauthor: Alice\n---\n# Patch Test\n\nOld text here");
+
+		const patched = await callTool(client, "patch_note", {
+			path: "patch.md",
+			oldString: "Old text",
+			newString: "New text",
+		});
+		expect(patched.body).toEqual({ ok: true, replacements: 1 });
+
+		const read = await callTool(client, "read_note", { path: "patch.md" });
+		const content = read.body.content;
+
+		// Provenance stamps should be added
+		expect(content).toContain("updated: 2099-06-13");
+		expect(content).toContain("updatedBy: Claude <i_claude>");
+
+		// Original field and patched content
+		expect(content).toContain("author: Alice");
+		expect(content).toContain("New text here");
+		expect(content).not.toContain("Old text");
+
+		await client.close();
+	});
+});
+
+describe("read-tier navigation tools", () => {
+	it("list_notes returns in-scope notes with hasComments flags", async () => {
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "list_notes", {});
+		expect(Array.isArray(body.notes)).toBe(true);
+		const paths = body.notes.map((n: any) => n.path);
+		expect(paths).toContain("inbox/idea.md");
+		expect(paths).toContain("inbox/other.md");
+		// All notes should have hasComments as a boolean
+		body.notes.forEach((note: any) => {
+			expect(typeof note.hasComments).toBe("boolean");
+		});
+		await client.close();
+	});
+
+	it("list_notes is fenced: fenced key sees empty vault", async () => {
+		const client = await mcpClient("fenced");
+		const { body } = await callTool(client, "list_notes", {});
+		expect(body.notes).toEqual([]);
+		await client.close();
+	});
+
+	it("read_multiple_notes partial success", async () => {
+		const client = await mcpClient("claude-full");
+		const { body } = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md", "does/not/exist.md"],
+		});
+		expect(body.ok).toHaveLength(1);
+		expect(body.ok[0].path).toBe("inbox/idea.md");
+		expect(body.ok[0].content).toBeTruthy();
+		expect(body.err).toHaveLength(1);
+		expect(body.err[0].path).toBe("does/not/exist.md");
+		expect(body.err[0].error).toBe("not found");
+		await client.close();
+	});
+
+	it("read_multiple_notes fence miss", async () => {
+		const client = await mcpClient("fenced");
+		const { body } = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md"],
+		});
+		expect(body.ok).toEqual([]);
+		expect(body.err).toHaveLength(1);
+		expect(body.err[0].path).toBe("inbox/idea.md");
+		expect(body.err[0].error).toContain("fence");
+		await client.close();
+	});
+
+	it("poll tier can call list_notes and read_multiple_notes", async () => {
+		const client = await mcpClient("claude-watch");
+		const tools = await client.listTools();
+		const toolNames = tools.tools.map((t) => t.name);
+		expect(toolNames).toContain("list_notes");
+		expect(toolNames).toContain("read_multiple_notes");
+
+		// Verify they actually work
+		const list = await callTool(client, "list_notes", {});
+		expect(list.body.notes).toBeDefined();
+		expect(Array.isArray(list.body.notes)).toBe(true);
+
+		const read = await callTool(client, "read_multiple_notes", {
+			paths: ["inbox/idea.md"],
+		});
+		expect(read.body.ok).toBeDefined();
+		expect(read.body.err).toBeDefined();
+
+		await client.close();
+	});
+
+	describe("search_notes", () => {
+		it("finds a match", async () => {
+			const client = await mcpClient("claude-full");
+			// Create a dedicated test note that won't be touched by other tests
+			await callTool(client, "create_note", {
+				path: "search-test/fixture.md",
+				content: "# Search Test\n\nThis is a searchable fixture.\n",
+			});
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toBeDefined();
+			expect(Array.isArray(body.hits)).toBe(true);
+			expect(body.hits.length).toBeGreaterThan(0);
+			const hit = body.hits[0];
+			expect(hit.path).toBe("search-test/fixture.md");
+			expect(typeof hit.line).toBe("number");
+			expect(hit.line).toBeGreaterThan(0);
+			expect(typeof hit.excerpt).toBe("string");
+			expect(hit.excerpt.length).toBeGreaterThan(0);
+			expect(typeof hit.score).toBe("number");
+			await client.close();
+		});
+
+		it("query that matches nothing returns empty", async () => {
+			const client = await mcpClient("claude-full");
+			const { body } = await callTool(client, "search_notes", { query: "zzznotfound" });
+			expect(body.hits).toEqual([]);
+			await client.close();
+		});
+
+		it("fenced key sees nothing outside its fence", async () => {
+			const client = await mcpClient("fenced");
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toEqual([]);
+			await client.close();
+		});
+
+		it("poll tier can search + tool is registered", async () => {
+			const client = await mcpClient("claude-watch");
+			const tools = await client.listTools();
+			const toolNames = tools.tools.map((t) => t.name);
+			expect(toolNames).toContain("search_notes");
+
+			const { body } = await callTool(client, "search_notes", { query: "searchable" });
+			expect(body.hits).toBeDefined();
+			expect(Array.isArray(body.hits)).toBe(true);
+
+			await client.close();
+		});
+
+		it("absent seam returns empty hits", async () => {
+			const PORT_NOSEARCH = 27982;
+			const BASE_NOSEARCH = `http://127.0.0.1:${PORT_NOSEARCH}`;
+
+			let serverNoSearch: AnnotatedMcpServer;
+			let storageNoSearch: InMemoryStorageAdapter;
+			let notesStoreNoSearch: Map<string, string>;
+
+			function buildNotesNoSearch(): NoteAccess {
+				notesStoreNoSearch = new Map([
+					["inbox/idea.md", "# Idea\n\nLine three has the thing.\n"],
+					["inbox/other.md", "# Other\n\nfoo bar foo\n"],
+				]);
+				return {
+					exists: async (p) => notesStoreNoSearch.has(p),
+					read: async (p) => {
+						const c = notesStoreNoSearch.get(p);
+						if (c === undefined) throw new Error(`ENOENT ${p}`);
+						return c;
+					},
+					write: async (p, content) => void notesStoreNoSearch.set(p, content),
+					mkdir: async () => {},
+					listCommentedNotePaths: async () => {
+						const suffix = ".comments.json";
+						return [...storageNoSearch.files.keys()]
+							.filter((p) => p.endsWith(suffix))
+							.map((p) => p.slice(0, -suffix.length));
+					},
+					listPaths: async () => [...notesStoreNoSearch.keys()].filter((p) => p.endsWith(".md")),
+					// Intentionally omit search method
+				};
+			}
+
+			try {
+				storageNoSearch = new InMemoryStorageAdapter();
+				const storeNoSearch = new CommentStore(storageNoSearch, { createdBy: "test@0.0.0" });
+				const keysNoSearch: KeyRecord[] = [
+					{ tokenHash: await hashToken("full-nosearch"), identityId: "i_claude", scope: "full" },
+				];
+				serverNoSearch = new AnnotatedMcpServer(
+					{
+						store: storeNoSearch,
+						notes: buildNotesNoSearch(),
+						auth: { getIdentities: () => [claude], getKeys: () => keysNoSearch },
+						info: { vaultName: "test-vault", pluginVersion: "0.0.0-test" },
+					},
+					{ port: PORT_NOSEARCH, host: "127.0.0.1" },
+				);
+				await serverNoSearch.start();
+
+				const client = new Client({ name: "test-client", version: "0.0.0" });
+				await client.connect(
+					new StreamableHTTPClientTransport(new URL(`${BASE_NOSEARCH}/mcp`), {
+						requestInit: { headers: { Authorization: "Bearer full-nosearch" } },
+					}),
+				);
+
+				const { body } = await callTool(client, "search_notes", { query: "thing" });
+				expect(body.hits).toEqual([]);
+
+				await client.close();
+			} finally {
+				if (serverNoSearch) await serverNoSearch.stop();
+			}
+		});
+	});
+});
+

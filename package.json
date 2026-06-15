@@ -1,13 +1,14 @@
 {
   "name": "obsidian-annotated",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Code review-style comments for Obsidian notes",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "build:lite": "node esbuild.config.mjs production-lite",
-    "dist": "node esbuild.config.mjs production && mkdir -p dist/obsidian-annotated && cp main.js manifest.json styles.css dist/obsidian-annotated/",
+    "skill:zip": "node scripts/pack-skill.mjs",
+    "skill:zip:review": "node scripts/pack-skill.mjs review-vault",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -30,6 +31,6 @@
     "zod": "^4.4.3"
   },
   "workspaces": [
-    "packages/*"
+    "shared/*"
   ]
 }

@@ -1,0 +1,14 @@
+# summarize.yml — a request that produces an artifact in a companion note.
+#
+# Triggered by:  annotated: summarize
+# Cleared by:    the agent writing  annotated: summarized
+#
+# output: sibling → a MANAGED companion file. Re-running replaces it rather than
+# erroring (create-if-absent-else-patch-body), so a re-summarize stays in place.
+completedTag: summarized
+clearedBy: agent
+output: sibling
+do: |
+  Write a tight summary of this note — key points, decisions, and any open
+  questions — to a sibling note named "<name> (summary).md". Keep it to a
+  screenful. Then set the completedTag.

@@ -1,0 +1,20 @@
+# translate.yml — a PARAMETERIZED request (D2a).
+#
+# Triggered by:  annotated: translate/spanish
+#                annotated: translate/spanish,french   (comma list → fan-out)
+# Cleared by:    the agent writing  annotated: translated/spanish
+#                                    annotated: translated/spanish,french
+#
+# The part after "/" is {arg}. Because the receipt carries the arg,
+# translate/spanish and translate/french are distinct values — each announces
+# once and leaves its own receipt. With a comma list, `output: sibling` fans out
+# to one managed target per language (the name embeds the arg), so re-running one
+# language never clobbers another.
+completedTag: "translated/{arg}"
+clearedBy: agent
+output: sibling
+do: |
+  For each language in {arg}, translate this note's body into that language and
+  write it to a sibling note "<name>.<language>.md" — one file per language.
+  Preserve the frontmatter and the heading structure; translate prose only.
+  When all languages are done, set the completedTag.

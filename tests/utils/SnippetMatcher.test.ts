@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { captureSnippet, findLineBySnippet, bigramSimilarity } from "../../src/utils/SnippetMatcher";
+import { captureSnippet, findLineBySnippet, bigramSimilarity } from "../../plugin/utils/SnippetMatcher";
 
 describe("captureSnippet", () => {
   it("returns first 50 chars trimmed", () => {
