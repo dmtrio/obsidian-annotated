@@ -7,34 +7,28 @@
 import express from "express";
 import type { Response } from "express";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import type {
-  AuthorizationParams,
-  OAuthServerProvider,
-} from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthorizationParams, OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type {
-  OAuthClientInformationFull,
-  OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { KeyScope } from "@annotated/comments-core";
 
 export interface VerifiedKey {
-  identityName: string;
-  scope: KeyScope;
+	identityName: string;
+	scope: KeyScope;
 }
 
 export interface OAuthGateDeps {
-  /** Resolve a pasted access key. Null = invalid. Never log the key. */
-  verifyKey(token: string): Promise<VerifiedKey | null>;
-  /** Device-local persistence for dynamically registered OAuth clients. */
-  loadClients(): OAuthClientInformationFull[];
-  saveClients(clients: OAuthClientInformationFull[]): void;
-  /** Public base URL of this server, e.g. "https://mcp-obsidian.dmetr.io" or "http://127.0.0.1:27191". */
-  issuerUrl: string;
-  serverName: string;
-  onLog?: (message: string) => void;
+	/** Resolve a pasted access key. Null = invalid. Never log the key. */
+	verifyKey(token: string): Promise<VerifiedKey | null>;
+	/** Device-local persistence for dynamically registered OAuth clients. */
+	loadClients(): OAuthClientInformationFull[];
+	saveClients(clients: OAuthClientInformationFull[]): void;
+	/** Public base URL of this server, e.g. "https://mcp-obsidian.dmetr.io" or "http://127.0.0.1:27191". */
+	issuerUrl: string;
+	serverName: string;
+	onLog?: (message: string) => void;
 }
 
 export const LOGIN_PATH = "/oauth/annotated-login";
@@ -43,81 +37,75 @@ export const LOGIN_PATH = "/oauth/annotated-login";
  * Value for the WWW-Authenticate header on 401s so clients can discover OAuth.
  */
 export function wwwAuthenticate(issuerUrl: string): string {
-  const baseUrl = issuerUrl.endsWith("/") ? issuerUrl.slice(0, -1) : issuerUrl;
-  return `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`;
+	const baseUrl = issuerUrl.endsWith("/") ? issuerUrl.slice(0, -1) : issuerUrl;
+	return `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`;
 }
 
 function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  };
-  return text.replace(/[&<>"']/g, (char) => map[char]);
+	const map: Record<string, string> = {
+		"&": "&amp;",
+		"<": "&lt;",
+		">": "&gt;",
+		'"': "&quot;",
+		"'": "&#039;",
+	};
+	return text.replace(/[&<>"']/g, (char) => map[char]);
 }
 
 interface CodeEntry {
-  key: string;
-  codeChallenge: string;
-  clientId: string;
-  redirectUri: string;
-  state?: string;
-  expiresAt: number;
+	key: string;
+	codeChallenge: string;
+	clientId: string;
+	redirectUri: string;
+	state?: string;
+	expiresAt: number;
 }
 
 const codeStore = new Map<string, CodeEntry>();
 
 function purgeExpiredCodes(): void {
-  const now = Date.now();
-  for (const [code, entry] of codeStore.entries()) {
-    if (entry.expiresAt <= now) {
-      codeStore.delete(code);
-    }
-  }
+	const now = Date.now();
+	for (const [code, entry] of codeStore.entries()) {
+		if (entry.expiresAt <= now) {
+			codeStore.delete(code);
+		}
+	}
 }
 
-export function buildOAuthGate(deps: OAuthGateDeps): {
-  handler: express.Express;
-} {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
+export function buildOAuthGate(deps: OAuthGateDeps): { handler: express.Express } {
+	const app = express();
+	app.use(express.urlencoded({ extended: false }));
 
-  const store: OAuthRegisteredClientsStore = {
-    getClient: (clientId: string) => {
-      const clients = deps.loadClients();
-      return clients.find((c) => c.client_id === clientId);
-    },
-    registerClient: async (clientInfo) => {
-      const clientId = "anncli_" + crypto.randomUUID();
-      const clientIdIssuedAt = Math.floor(Date.now() / 1000);
-      const full: OAuthClientInformationFull = {
-        ...clientInfo,
-        client_id: clientId,
-        client_id_issued_at: clientIdIssuedAt,
-      };
-      const clients = deps.loadClients();
-      clients.push(full);
-      deps.saveClients(clients);
-      return full;
-    },
-  };
+	const store: OAuthRegisteredClientsStore = {
+		getClient: (clientId: string) => {
+			const clients = deps.loadClients();
+			return clients.find((c) => c.client_id === clientId);
+		},
+		registerClient: async (clientInfo) => {
+			const clientId = "anncli_" + crypto.randomUUID();
+			const clientIdIssuedAt = Math.floor(Date.now() / 1000);
+			const full: OAuthClientInformationFull = {
+				...clientInfo,
+				client_id: clientId,
+				client_id_issued_at: clientIdIssuedAt,
+			};
+			const clients = deps.loadClients();
+			clients.push(full);
+			deps.saveClients(clients);
+			return full;
+		},
+	};
 
-  const provider: OAuthServerProvider = {
-    get clientsStore(): OAuthRegisteredClientsStore {
-      return store;
-    },
+	const provider: OAuthServerProvider = {
+		get clientsStore(): OAuthRegisteredClientsStore {
+			return store;
+		},
 
-    async authorize(
-      client: OAuthClientInformationFull,
-      params: AuthorizationParams,
-      res: Response,
-    ): Promise<void> {
-      const clientName = client.client_name ?? client.client_id;
-      const serverName = escapeHtml(deps.serverName);
-      const escapedClientName = escapeHtml(clientName);
-      const html = `<!DOCTYPE html>
+		async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
+			const clientName = client.client_name ?? client.client_id;
+			const serverName = escapeHtml(deps.serverName);
+			const escapedClientName = escapeHtml(clientName);
+			const html = `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="UTF-8">
@@ -240,79 +228,76 @@ export function buildOAuthGate(deps: OAuthGateDeps): {
 	</div>
 </body>
 </html>`;
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.status(200).send(html);
-    },
+			res.setHeader("Content-Type", "text/html; charset=utf-8");
+			res.status(200).send(html);
+		},
 
-    async challengeForAuthorizationCode(
-      client: OAuthClientInformationFull,
-      authorizationCode: string,
-    ): Promise<string> {
-      purgeExpiredCodes();
-      const entry = codeStore.get(authorizationCode);
-      if (!entry || entry.clientId !== client.client_id) {
-        throw new Error("Unknown or expired authorization code");
-      }
-      return entry.codeChallenge;
-    },
+		async challengeForAuthorizationCode(client: OAuthClientInformationFull, authorizationCode: string): Promise<string> {
+			purgeExpiredCodes();
+			const entry = codeStore.get(authorizationCode);
+			if (!entry || entry.clientId !== client.client_id) {
+				throw new Error("Unknown or expired authorization code");
+			}
+			return entry.codeChallenge;
+		},
 
-    async exchangeAuthorizationCode(
-      client: OAuthClientInformationFull,
-      authorizationCode: string,
-      _codeVerifier?: string,
-      redirectUri?: string,
-      _resource?: URL,
-    ): Promise<OAuthTokens> {
-      purgeExpiredCodes();
-      const entry = codeStore.get(authorizationCode);
-      if (!entry || entry.clientId !== client.client_id) {
-        throw new Error("Unknown or expired authorization code");
-      }
-      if (redirectUri !== undefined && redirectUri !== entry.redirectUri) {
-        throw new Error("redirect_uri mismatch");
-      }
-      codeStore.delete(authorizationCode);
-      return {
-        access_token: entry.key,
-        token_type: "bearer",
-      };
-    },
+		async exchangeAuthorizationCode(
+			client: OAuthClientInformationFull,
+			authorizationCode: string,
+			_codeVerifier?: string,
+			redirectUri?: string,
+			_resource?: URL,
+		): Promise<OAuthTokens> {
+			purgeExpiredCodes();
+			const entry = codeStore.get(authorizationCode);
+			if (!entry || entry.clientId !== client.client_id) {
+				throw new Error("Unknown or expired authorization code");
+			}
+			if (redirectUri !== undefined && redirectUri !== entry.redirectUri) {
+				throw new Error("redirect_uri mismatch");
+			}
+			codeStore.delete(authorizationCode);
+			return {
+				access_token: entry.key,
+				token_type: "bearer",
+			};
+		},
 
-    async exchangeRefreshToken(): Promise<OAuthTokens> {
-      throw new Error("Refresh tokens are not supported");
-    },
+		async exchangeRefreshToken(): Promise<OAuthTokens> {
+			throw new Error("Refresh tokens are not supported");
+		},
 
-    async verifyAccessToken(token: string): Promise<AuthInfo> {
-      const verified = await deps.verifyKey(token);
-      if (!verified) {
-        throw new Error("Invalid access token");
-      }
-      return {
-        token,
-        clientId: "annotated-key",
-        scopes: ["annotated:" + verified.scope],
-        extra: {
-          identityName: verified.identityName,
-        },
-      };
-    },
+		async verifyAccessToken(token: string): Promise<AuthInfo> {
+			const verified = await deps.verifyKey(token);
+			if (!verified) {
+				throw new Error("Invalid access token");
+			}
+			return {
+				token,
+				clientId: "annotated-key",
+				scopes: ["annotated:" + verified.scope],
+				extra: {
+					identityName: verified.identityName,
+				},
+			};
+		},
 
-    async revokeToken(): Promise<void> {
-      // No-op: revocation happens in the plugin's key UI.
-    },
-  };
+		async revokeToken(): Promise<void> {
+			// No-op: revocation happens in the plugin's key UI.
+		},
+	};
 
-  // Helper to render authorize form with error
-  function renderAuthorizeWithError(
-    client: OAuthClientInformationFull,
-    params: AuthorizationParams,
-    errorMessage: string,
-  ): string {
-    const clientName = client.client_name ?? client.client_id;
-    const serverName = escapeHtml(deps.serverName);
-    const escapedClientName = escapeHtml(clientName);
-    const escapedError = escapeHtml(errorMessage);
-    return `<!DOCTYPE html>
+	// Helper to render authorize form with error
+	function renderAuthorizeWithError(
+		client: OAuthClientInformationFull,
+		params: AuthorizationParams,
+		errorMessage: string,
+	): string {
+		const clientName = client.client_name ?? client.client_id;
+		const serverName = escapeHtml(deps.serverName);
+		const escapedClientName = escapeHtml(clientName);
+		const escapedError = escapeHtml(errorMessage);
+		return `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="UTF-8">
@@ -436,94 +421,88 @@ export function buildOAuthGate(deps: OAuthGateDeps): {
 	</div>
 </body>
 </html>`;
-  }
+	}
 
-  // POST /oauth/annotated-login
-  app.post(LOGIN_PATH, async (req, res) => {
-    try {
-      const key = req.body.key;
-      const clientId = req.body.client_id;
-      const redirectUri = req.body.redirect_uri;
-      const codeChallenge = req.body.code_challenge;
-      const state = req.body.state;
+	// POST /oauth/annotated-login
+	app.post(LOGIN_PATH, async (req, res) => {
+		try {
+			const key = req.body.key;
+			const clientId = req.body.client_id;
+			const redirectUri = req.body.redirect_uri;
+			const codeChallenge = req.body.code_challenge;
+			const state = req.body.state;
 
-      // Validate required parameters
-      if (!key || !clientId || !redirectUri || !codeChallenge) {
-        res.status(400).json({ error: "invalid_request" });
-        return;
-      }
+			// Validate required parameters
+			if (!key || !clientId || !redirectUri || !codeChallenge) {
+				res.status(400).json({ error: "invalid_request" });
+				return;
+			}
 
-      // Look up client
-      const client = await store.getClient(clientId);
-      if (!client) {
-        res.status(400).json({ error: "invalid_client" });
-        return;
-      }
+			// Look up client
+			const client = await store.getClient(clientId);
+			if (!client) {
+				res.status(400).json({ error: "invalid_client" });
+				return;
+			}
 
-      // Validate redirect_uri against registered URIs
-      if (
-        !client.redirect_uris ||
-        !client.redirect_uris.includes(redirectUri)
-      ) {
-        res.status(400).json({ error: "invalid_redirect_uri" });
-        return;
-      }
+			// Validate redirect_uri against registered URIs
+			if (!client.redirect_uris || !client.redirect_uris.includes(redirectUri)) {
+				res.status(400).json({ error: "invalid_redirect_uri" });
+				return;
+			}
 
-      // Verify the key
-      const verified = await deps.verifyKey(key);
-      if (!verified) {
-        // Re-render the authorize form with error message
-        const errorForm = renderAuthorizeWithError(
-          client,
-          { redirectUri, codeChallenge, state: state || undefined },
-          "",
-        );
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.status(200).send(errorForm);
-        return;
-      }
+			// Verify the key
+			const verified = await deps.verifyKey(key);
+			if (!verified) {
+				// Re-render the authorize form with error message
+				const errorForm = renderAuthorizeWithError(
+					client,
+					{ redirectUri, codeChallenge, state: state || undefined },
+					"",
+				);
+				res.setHeader("Content-Type", "text/html; charset=utf-8");
+				res.status(200).send(errorForm);
+				return;
+			}
 
-      // Generate authorization code
-      const code = "anncode_" + crypto.randomUUID();
-      codeStore.set(code, {
-        key,
-        codeChallenge,
-        clientId,
-        redirectUri,
-        state: state || undefined,
-        expiresAt: Date.now() + 120_000,
-      });
+			// Generate authorization code
+			const code = "anncode_" + crypto.randomUUID();
+			codeStore.set(code, {
+				key,
+				codeChallenge,
+				clientId,
+				redirectUri,
+				state: state || undefined,
+				expiresAt: Date.now() + 120_000,
+			});
 
-      // Log (generic message only, never log the key)
-      deps.onLog?.(`oauth: code issued for client ${clientId}`);
+			// Log (generic message only, never log the key)
+			deps.onLog?.(`oauth: code issued for client ${clientId}`);
 
-      // Redirect with code
-      const redirectUrl = new URL(redirectUri);
-      redirectUrl.searchParams.set("code", code);
-      if (state) {
-        redirectUrl.searchParams.set("state", state);
-      }
+			// Redirect with code
+			const redirectUrl = new URL(redirectUri);
+			redirectUrl.searchParams.set("code", code);
+			if (state) {
+				redirectUrl.searchParams.set("state", state);
+			}
 
-      res.redirect(302, redirectUrl.toString());
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Internal server error";
-      res
-        .status(500)
-        .json({ error: "server_error", error_description: message });
-    }
-  });
+			res.redirect(302, redirectUrl.toString());
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Internal server error";
+			res.status(500).json({ error: "server_error", error_description: message });
+		}
+	});
 
-  // Mount the OAuth router
-  const issuerUrl = new URL(deps.issuerUrl);
-  app.use(
-    mcpAuthRouter({
-      provider,
-      issuerUrl,
-      scopesSupported: ["annotated:full", "annotated:watch"],
-      resourceName: deps.serverName,
-    }),
-  );
+	// Mount the OAuth router
+	const issuerUrl = new URL(deps.issuerUrl);
+	app.use(
+		mcpAuthRouter({
+			provider,
+			issuerUrl,
+			scopesSupported: ["annotated:full", "annotated:watch"],
+			resourceName: deps.serverName,
+		}),
+	);
 
-  return { handler: app };
+	return { handler: app };
 }
