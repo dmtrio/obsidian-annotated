@@ -23,7 +23,7 @@ export function findLineBySnippet(
 		return { line: hintLine, confidence: 1.0 };
 	}
 	for (let d = 1; d <= radius; d++) {
-		if (hintLine - d >= lo && docLines[hintLine - d].startsWith(snippet)) {
+		if (hintLine - d >= lo && hintLine - d <= hi && docLines[hintLine - d].startsWith(snippet)) {
 			return { line: hintLine - d, confidence: 1.0 };
 		}
 		if (hintLine + d <= hi && docLines[hintLine + d].startsWith(snippet)) {
