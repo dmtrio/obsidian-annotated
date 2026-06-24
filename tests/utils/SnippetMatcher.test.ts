@@ -74,6 +74,21 @@ describe("findLineBySnippet", () => {
     expect(result?.confidence).toBe(1.0);
   });
 
+  it("relocates without throwing when hint line is past end of doc", () => {
+    // Regression: a stale anchor whose hintLine is beyond EOF (note was edited
+    // shorter and re-synced) used to make the downward scan read undefined lines
+    // and throw on .startsWith, which rejected verifyAndRelocateComments and
+    // nuked ALL comments for the note. It must relocate by snippet instead.
+    // hint 6 is past EOF (doc has 5 lines) but within radius of the true line 2.
+    expect(() => findLineBySnippet(doc, "line two", 6)).not.toThrow();
+    expect(findLineBySnippet(doc, "line two", 6)).toEqual({ line: 2, confidence: 1.0 });
+  });
+
+  it("returns null (no throw) when hint is past EOF and snippet is absent", () => {
+    expect(() => findLineBySnippet(doc, "not in doc", 154)).not.toThrow();
+    expect(findLineBySnippet(doc, "not in doc", 154)).toBeNull();
+  });
+
   it("respects radius limit", () => {
     // Build a doc where each line is unique and no line within radius 50 of hint 0 resembles the target
     const bigDoc = Array.from({ length: 200 }, (_, i) => `alpha_${String(i).padStart(4, "0")}`);
